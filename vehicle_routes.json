@@ -1,0 +1,40 @@
+{
+  "drawings": {
+    "c:\\users\\tombe\\downloads\\dxf\\dxf\\lhc-ryd-mb-00-dg-ar-300001.dxf": {
+      "source_dxf": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-00-DG-AR-300001.dxf",
+      "levels": [
+        "Level 1",
+        "Level 2",
+        "Level 3",
+        "Level 4",
+        "Level 5",
+        "Level 6"
+      ],
+      "start_positions": [
+        {
+          "name": "Start 1",
+          "level_name": "Level 1",
+          "pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "heading_deg": 0.0
+          }
+        }
+      ],
+      "level_drawings": {
+        "Level 1": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-00-DG-AR-300001.dxf",
+        "Level 2": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-01-DG-AR-300002.dxf",
+        "Level 3": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-02-DG-AR-300003.dxf",
+        "Level 4": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-03-DG-AR-300004.dxf",
+        "Level 5": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-04-DG-AR-300005.dxf",
+        "Level 6": "C:\\Users\\tombe\\Downloads\\DXF\\DXF\\LHC-RYD-MB-05-DG-AR-300006.dxf"
+      },
+      "start_pose": {
+        "x": 0.0,
+        "y": 0.0,
+        "heading_deg": 0.0
+      },
+      "routes": []
+    }
+  }
+}
