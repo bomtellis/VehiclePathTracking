@@ -6,6 +6,7 @@ from math import cos, radians, sin, tan
 from pathlib import Path
 from typing import Any
 import json
+import os
 
 
 class SteeringMode(str, Enum):
@@ -148,11 +149,51 @@ class VehicleProfile:
         }
 
     @property
-    def max_turn_curvature(self) -> float:
+    def calculated_min_turning_radius(self) -> float:
+        """Theoretical minimum centre-path radius for the configured steering method."""
         angle = max(0.1, min(abs(self.max_steering_angle_deg), 89.0))
-        radius_from_angle = self.wheelbase / max(0.001, tan(radians(angle)))
-        radius = max(self.min_turning_radius, abs(radius_from_angle))
-        return 1.0 / radius
+        tangent = max(0.001, abs(tan(radians(angle))))
+        wheelbase = max(abs(self.wheelbase), 0.001)
+        if self.steering_mode in {
+            SteeringMode.ACKERMANN_FRONT,
+            SteeringMode.ACKERMANN_REAR,
+        }:
+            return wheelbase / tangent
+        if self.steering_mode == SteeringMode.FOUR_WHEEL:
+            # Equal front/rear steering in opposite phase doubles yaw contribution.
+            return wheelbase / (2.0 * tangent)
+        # Differential and omni running gear can rotate/reorient about the centre.
+        return 0.0
+
+    @property
+    def turning_radius_calculation(self) -> str:
+        angle = max(0.1, min(abs(self.max_steering_angle_deg), 89.0))
+        if self.steering_mode in {
+            SteeringMode.ACKERMANN_FRONT,
+            SteeringMode.ACKERMANN_REAR,
+        }:
+            return f"R = wheelbase / tan({angle:.1f} deg)"
+        if self.steering_mode == SteeringMode.FOUR_WHEEL:
+            return f"R = wheelbase / (2 x tan({angle:.1f} deg))"
+        if self.steering_mode == SteeringMode.DIFFERENTIAL:
+            return "R = 0 (counter-rotating driven wheels permit an in-place turn)"
+        return "R = 0 (holonomic motion permits in-place reorientation)"
+
+    @property
+    def effective_min_turning_radius(self) -> float:
+        return max(0.0, self.min_turning_radius, self.calculated_min_turning_radius)
+
+    @property
+    def max_turn_curvature(self) -> float:
+        radius = self.effective_min_turning_radius
+        return 1_000_000.0 if radius < 1e-9 else 1.0 / radius
+
+    @property
+    def supports_point_turn(self) -> bool:
+        """Whether the configured running gear can rotate the vehicle at a stop."""
+        if self.steering_mode == SteeringMode.DIFFERENTIAL:
+            return sum(1 for wheel in self.wheels if wheel.drive) >= 2
+        return any(wheel.drive and wheel.steerable for wheel in self.wheels)
 
 
 @dataclass
@@ -161,6 +202,7 @@ class Pose:
     y: float
     heading_deg: float
     steering_deg: float = 0.0
+    maneuver: str = ""
 
     def transformed_point(self, local_x: float, local_y: float) -> tuple[float, float]:
         heading = radians(self.heading_deg)
@@ -171,15 +213,80 @@ class Pose:
 
 
 @dataclass
+class StartPosition:
+    name: str
+    level_name: str
+    pose: Pose
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StartPosition":
+        pose = data.get("pose", {})
+        return cls(
+            str(data.get("name", "Start 1")),
+            str(data.get("level_name", "Level 1")),
+            Pose(
+                float(pose.get("x", 0.0)),
+                float(pose.get("y", 0.0)),
+                float(pose.get("heading_deg", 0.0)),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "level_name": self.level_name,
+            "pose": {
+                "x": self.pose.x,
+                "y": self.pose.y,
+                "heading_deg": self.pose.heading_deg,
+            },
+        }
+
+
+@dataclass
+class RouteOperation:
+    location: str
+    operation: str
+    waypoint_index: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RouteOperation":
+        index = data.get("waypoint_index")
+        return cls(
+            str(data.get("location", "waypoint")),
+            str(data.get("operation", "travel")),
+            int(index) if isinstance(index, (int, float)) else None,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "location": self.location,
+            "operation": self.operation,
+            "waypoint_index": self.waypoint_index,
+        }
+
+
+@dataclass
 class RoutePlan:
     name: str
     end_pose: Pose
     waypoints: list[tuple[float, float]] = field(default_factory=list)
+    point_turn_indices: list[int] = field(default_factory=list)
+    reversing_action_indices: list[int] = field(default_factory=list)
+    level_name: str = "Level 1"
+    start_position_name: str = "Start 1"
+    start_pose: Pose | None = None
+    tangent_handles: dict[int, tuple[float, float]] = field(default_factory=dict)
+    payload_action: str = "none"
+    operations: list[RouteOperation] = field(default_factory=list)
+    dropoff_pose: Pose | None = None
+    point_path_modes: dict[int, str] = field(default_factory=dict)
+    dropoff_waypoint_index: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoutePlan":
         end = data.get("end_pose", {})
-        return cls(
+        plan = cls(
             name=str(data.get("name", "Path")),
             end_pose=Pose(
                 float(end.get("x", 0.0)),
@@ -192,7 +299,95 @@ class RoutePlan:
                 for point in data.get("waypoints", [])
                 if isinstance(point, (list, tuple)) and len(point) >= 2
             ],
+            point_turn_indices=sorted(
+                {
+                    int(index)
+                    for index in data.get("point_turn_indices", [])
+                    if isinstance(index, (int, float)) and int(index) >= 0
+                }
+            ),
+            reversing_action_indices=sorted(
+                {
+                    int(index)
+                    for index in data.get("reversing_action_indices", [])
+                    if isinstance(index, (int, float)) and int(index) >= 0
+                }
+            ),
+            level_name=str(data.get("level_name", "Level 1")),
+            start_position_name=str(data.get("start_position_name", "Start 1")),
+            start_pose=(
+                Pose(
+                    float(data["start_pose"].get("x", 0.0)),
+                    float(data["start_pose"].get("y", 0.0)),
+                    float(data["start_pose"].get("heading_deg", 0.0)),
+                )
+                if isinstance(data.get("start_pose"), dict)
+                else None
+            ),
+            tangent_handles={
+                int(index): (float(value[0]), float(value[1]))
+                for index, value in data.get("tangent_handles", {}).items()
+                if str(index).lstrip("-").isdigit()
+                and int(index) >= 0
+                and isinstance(value, (list, tuple))
+                and len(value) >= 2
+            },
+            payload_action=(
+                str(data.get("payload_action", "none"))
+                if str(data.get("payload_action", "none")) in {"none", "dropoff", "pickup"}
+                else "none"
+            ),
+            operations=[
+                RouteOperation.from_dict(item)
+                for item in data.get("operations", [])
+                if isinstance(item, dict)
+            ],
+            dropoff_pose=(
+                Pose(
+                    float(data["dropoff_pose"].get("x", 0.0)),
+                    float(data["dropoff_pose"].get("y", 0.0)),
+                    float(data["dropoff_pose"].get("heading_deg", 0.0)),
+                )
+                if isinstance(data.get("dropoff_pose"), dict)
+                else None
+            ),
+            point_path_modes={
+                int(index): str(mode)
+                for index, mode in data.get("point_path_modes", {}).items()
+                if str(index).isdigit() and str(mode) in {"straight", "turn"}
+            },
+            dropoff_waypoint_index=(
+                max(0, int(data["dropoff_waypoint_index"]))
+                if isinstance(data.get("dropoff_waypoint_index"), (int, float))
+                else None
+            ),
         )
+        if plan.operations and not (
+            data.get("point_turn_indices") or data.get("reversing_action_indices")
+        ):
+            plan.point_turn_indices = sorted(
+                operation.waypoint_index
+                for operation in plan.operations
+                if operation.location == "waypoint"
+                and operation.operation == "point_turn"
+                and operation.waypoint_index is not None
+            )
+            plan.reversing_action_indices = sorted(
+                operation.waypoint_index
+                for operation in plan.operations
+                if operation.location == "waypoint"
+                and operation.operation == "reverse"
+                and operation.waypoint_index is not None
+            )
+        if plan.operations and not data.get("point_path_modes"):
+            plan.point_path_modes = {
+                operation.waypoint_index: operation.operation
+                for operation in plan.operations
+                if operation.location == "waypoint"
+                and operation.operation in {"straight", "turn"}
+                and operation.waypoint_index is not None
+            }
+        return plan
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -203,7 +398,69 @@ class RoutePlan:
                 "heading_deg": self.end_pose.heading_deg,
             },
             "waypoints": [[x, y] for x, y in self.waypoints],
+            "point_turn_indices": list(self.point_turn_indices),
+            "reversing_action_indices": list(self.reversing_action_indices),
+            "level_name": self.level_name,
+            "start_position_name": self.start_position_name,
+            "start_pose": (
+                {
+                    "x": self.start_pose.x,
+                    "y": self.start_pose.y,
+                    "heading_deg": self.start_pose.heading_deg,
+                }
+                if self.start_pose is not None
+                else None
+            ),
+            "tangent_handles": {
+                str(index): [vector[0], vector[1]]
+                for index, vector in sorted(self.tangent_handles.items())
+            },
+            "payload_action": self.payload_action,
+            "operations": [operation.to_dict() for operation in self.ordered_operations()],
+            "dropoff_pose": (
+                {
+                    "x": self.dropoff_pose.x,
+                    "y": self.dropoff_pose.y,
+                    "heading_deg": self.dropoff_pose.heading_deg,
+                }
+                if self.dropoff_pose is not None
+                else None
+            ),
+            "point_path_modes": {
+                str(index): mode for index, mode in sorted(self.point_path_modes.items())
+            },
+            "dropoff_waypoint_index": self.dropoff_waypoint_index,
         }
+
+    def ordered_operations(self) -> list[RouteOperation]:
+        if self.operations:
+            return list(self.operations)
+        operations = [RouteOperation("start", "travel")]
+        point_turns = set(self.point_turn_indices)
+        reverses = set(self.reversing_action_indices)
+        dropoff_index = (
+            min(self.dropoff_waypoint_index, len(self.waypoints))
+            if self.dropoff_pose is not None and self.dropoff_waypoint_index is not None
+            else len(self.waypoints)
+        )
+        for index in range(len(self.waypoints)):
+            if self.dropoff_pose is not None and index == dropoff_index:
+                operations.append(RouteOperation("dropoff", "dropoff"))
+                operations.append(RouteOperation("dropoff", "reverse"))
+            operation = (
+                "point_turn"
+                if index in point_turns
+                else "reverse"
+                if index in reverses
+                else self.point_path_modes.get(index, "turn")
+            )
+            operations.append(RouteOperation("waypoint", operation, index))
+        if self.dropoff_pose is not None and dropoff_index == len(self.waypoints):
+            operations.append(RouteOperation("dropoff", "dropoff"))
+            operations.append(RouteOperation("dropoff", "reverse"))
+        endpoint_operation = self.payload_action if self.payload_action in {"pickup", "dropoff"} else "stop"
+        operations.append(RouteOperation("end", endpoint_operation))
+        return operations
 
 
 def step_pose(
@@ -227,7 +484,7 @@ def step_pose(
     if profile.steering_mode == SteeringMode.ACKERMANN_REAR:
         curvature *= -1.0
     elif profile.steering_mode == SteeringMode.FOUR_WHEEL:
-        curvature *= 1.75
+        curvature *= 2.0
     elif profile.steering_mode == SteeringMode.DIFFERENTIAL:
         curvature = steering / max(profile.max_steering_angle_deg, 0.001)
         curvature *= profile.max_turn_curvature
@@ -288,34 +545,194 @@ class RouteStore:
         return str(drawing_path.resolve()).casefold() if drawing_path else "__blank_canvas__"
 
     def load(self, drawing_path: Path | None) -> tuple[Pose | None, list[RoutePlan]]:
+        _levels, starts, routes = self.load_configuration(drawing_path)
+        return (starts[0].pose if starts else None), routes
+
+    def load_configuration(
+        self, drawing_path: Path | None
+    ) -> tuple[list[str], list[StartPosition], list[RoutePlan]]:
         if not self.path.exists():
-            return None, []
+            return ["Level 1"], [StartPosition("Start 1", "Level 1", Pose(0.0, 0.0, 0.0))], []
         data = json.loads(self.path.read_text(encoding="utf-8"))
         route_set = data.get("drawings", {}).get(self._key(drawing_path), {})
+        levels = [str(value) for value in route_set.get("levels", []) if str(value).strip()]
+        if not levels:
+            levels = ["Level 1"]
+        starts = [
+            StartPosition.from_dict(item)
+            for item in route_set.get("start_positions", [])
+            if isinstance(item, dict)
+        ]
         start_data = route_set.get("start_pose")
-        start_pose = None
-        if isinstance(start_data, dict):
-            start_pose = Pose(
-                float(start_data.get("x", 0.0)),
-                float(start_data.get("y", 0.0)),
-                float(start_data.get("heading_deg", 0.0)),
-                0.0,
-            )
+        if not starts:
+            pose = Pose(0.0, 0.0, 0.0)
+            if isinstance(start_data, dict):
+                pose = Pose(
+                    float(start_data.get("x", 0.0)),
+                    float(start_data.get("y", 0.0)),
+                    float(start_data.get("heading_deg", 0.0)),
+                )
+            starts = [StartPosition("Start 1", levels[0], pose)]
+        for start in starts:
+            if start.level_name not in levels:
+                levels.append(start.level_name)
         routes = [RoutePlan.from_dict(item) for item in route_set.get("routes", [])]
-        return start_pose, routes
+        for route in routes:
+            if route.start_pose is None:
+                matching = next(
+                    (start for start in starts if start.name == route.start_position_name),
+                    starts[0],
+                )
+                route.start_pose = Pose(
+                    matching.pose.x, matching.pose.y, matching.pose.heading_deg
+                )
+                route.start_position_name = matching.name
+                route.level_name = matching.level_name
+        return levels, starts, routes
 
-    def save(self, drawing_path: Path | None, start_pose: Pose, routes: list[RoutePlan]) -> None:
+    def load_level_drawings(self, drawing_path: Path | None) -> dict[str, Path]:
+        if not self.path.exists():
+            return {}
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        route_set = data.get("drawings", {}).get(self._key(drawing_path), {})
+        drawings: dict[str, Path] = {}
+        for level, value in route_set.get("level_drawings", {}).items():
+            if str(level).strip() and str(value).strip():
+                drawings[str(level)] = Path(str(value))
+        return drawings
+
+    def save_configuration(
+        self,
+        drawing_path: Path | None,
+        levels: list[str],
+        start_positions: list[StartPosition],
+        routes: list[RoutePlan],
+        level_drawings: dict[str, Path] | None = None,
+    ) -> None:
         data: dict[str, Any] = {"drawings": {}}
         if self.path.exists():
             data = json.loads(self.path.read_text(encoding="utf-8"))
             data.setdefault("drawings", {})
-        data["drawings"][self._key(drawing_path)] = {
+        primary = start_positions[0] if start_positions else StartPosition(
+            "Start 1", levels[0] if levels else "Level 1", Pose(0.0, 0.0, 0.0)
+        )
+        key = self._key(drawing_path)
+        existing_drawings = data["drawings"].get(key, {}).get("level_drawings", {})
+        drawing_values = (
+            {level: str(path.resolve()) for level, path in level_drawings.items()}
+            if level_drawings is not None
+            else existing_drawings
+        )
+        data["drawings"][key] = {
             "source_dxf": str(drawing_path.resolve()) if drawing_path else "",
+            "levels": list(dict.fromkeys(levels or ["Level 1"])),
+            "start_positions": [start.to_dict() for start in start_positions],
+            "level_drawings": drawing_values,
             "start_pose": {
-                "x": start_pose.x,
-                "y": start_pose.y,
-                "heading_deg": start_pose.heading_deg,
+                "x": primary.pose.x,
+                "y": primary.pose.y,
+                "heading_deg": primary.pose.heading_deg,
             },
             "routes": [route.to_dict() for route in routes],
         }
         self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def save(self, drawing_path: Path | None, start_pose: Pose, routes: list[RoutePlan]) -> None:
+        self.save_configuration(
+            drawing_path,
+            ["Level 1"],
+            [StartPosition("Start 1", "Level 1", start_pose)],
+            routes,
+        )
+
+
+@dataclass
+class VehicleTrackingProject:
+    levels: list[str]
+    level_drawings: dict[str, Path]
+    start_positions: list[StartPosition]
+    routes: list[RoutePlan]
+    vehicles: list[VehicleProfile]
+    active_level: str
+    active_start: str
+
+
+class ProjectStore:
+    VERSION = 1
+
+    @classmethod
+    def save(cls, path: Path, project: VehicleTrackingProject) -> None:
+        path = path.resolve()
+
+        def portable_path(value: Path) -> str:
+            resolved = value.resolve()
+            try:
+                return os.path.relpath(resolved, path.parent)
+            except ValueError:
+                return str(resolved)
+
+        payload = {
+            "format": "vehicle-tracking-project",
+            "version": cls.VERSION,
+            "levels": list(project.levels),
+            "level_drawings": {
+                level: portable_path(drawing)
+                for level, drawing in project.level_drawings.items()
+            },
+            "start_positions": [start.to_dict() for start in project.start_positions],
+            "routes": [route.to_dict() for route in project.routes],
+            "vehicles": [vehicle.to_dict() for vehicle in project.vehicles],
+            "active_level": project.active_level,
+            "active_start": project.active_start,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: Path) -> VehicleTrackingProject:
+        path = path.resolve()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("format") != "vehicle-tracking-project":
+            raise ValueError("This is not a Vehicle Tracking project file.")
+        version = int(data.get("version", 0))
+        if version > cls.VERSION:
+            raise ValueError(
+                f"Project version {version} is newer than this application supports ({cls.VERSION})."
+            )
+        levels = [str(value) for value in data.get("levels", []) if str(value).strip()]
+        if not levels:
+            raise ValueError("The project does not contain any floor levels.")
+        drawings: dict[str, Path] = {}
+        for level, value in data.get("level_drawings", {}).items():
+            candidate = Path(str(value))
+            if not candidate.is_absolute():
+                candidate = (path.parent / candidate).resolve()
+            drawings[str(level)] = candidate
+        starts = [
+            StartPosition.from_dict(item)
+            for item in data.get("start_positions", [])
+            if isinstance(item, dict)
+        ]
+        if not starts:
+            starts = [StartPosition("Start 1", levels[0], Pose(0.0, 0.0, 0.0))]
+        routes = [
+            RoutePlan.from_dict(item)
+            for item in data.get("routes", [])
+            if isinstance(item, dict)
+        ]
+        vehicles = [
+            VehicleProfile.from_dict(item)
+            for item in data.get("vehicles", [])
+            if isinstance(item, dict)
+        ]
+        if not vehicles:
+            vehicles = [VehicleProfile()]
+        active_level = str(data.get("active_level", levels[0]))
+        if active_level not in levels:
+            active_level = levels[0]
+        active_start = str(data.get("active_start", starts[0].name))
+        if not any(start.name == active_start for start in starts):
+            active_start = starts[0].name
+        return VehicleTrackingProject(
+            levels, drawings, starts, routes, vehicles, active_level, active_start
+        )

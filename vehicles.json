@@ -6,7 +6,7 @@
       "width": 882.738,
       "steering_mode": "ackermann_rear",
       "wheelbase": 500.0,
-      "max_steering_angle_deg": 80.0,
+      "max_steering_angle_deg": 89.0,
       "min_turning_radius": 1000.0,
       "pose_spacing": 0.75,
       "dxf_block_name": "Forklift AMR",
