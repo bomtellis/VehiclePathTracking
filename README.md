@@ -31,6 +31,7 @@ Complete multi-floor jobs can be saved as `.vtproject` files. A project contains
 - Use **Settings** on the Home ribbon to select System, Light, or Dark mode and optionally override the DXF canvas background colour; appearance preferences persist between launches.
 - Open and save complete `.vtproject` files from the Home ribbon. Legacy DXFs can still be opened directly to start a new project.
 - Insert draggable orange control points on the planned route to tighten or reshape individual sections; selected points can be removed or all points cleared.
+- Draw the before-drop-off approach and after-drop-off exit independently: each section has its own **Draw Lines** action, uses isolated two-click CAD lines with polar snapping, and replaces only that section when its intersections and tangent fillets are applied.
 - Drag the paired blue curve handlebars on every ordinary route point to control tangent direction and strength for both adjoining curve sections; custom tangents persist with routes and projects.
 - Right-click a route point to enable a purple driven-wheel point turn. The planner rotates the vehicle at that position using the configured steering angle and checks that the profile has driven steerable wheels (or differential drive).
 - Use **Place Reverse Action** and click the planned route to add a red gear-change point. Travel after the point is reversed; placing another reversing action changes back to forward travel.

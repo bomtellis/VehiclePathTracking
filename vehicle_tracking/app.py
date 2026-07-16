@@ -97,6 +97,7 @@ class PayloadPickupAnalysis:
 class TrackingView(QGraphicsView):
     positionPlaced = Signal(str, QPointF, float)
     routeSketched = Signal(object)
+    routeSegmentsSketched = Signal(object)
 
     def __init__(self, scene: QGraphicsScene) -> None:
         super().__init__(scene)
@@ -108,7 +109,55 @@ class TrackingView(QGraphicsView):
         self._default_heading = 0.0
         self._heading_line: QGraphicsLineItem | None = None
         self._sketch_points: list[QPointF] = []
+        self._sketch_segments: list[tuple[QPointF, QPointF]] = []
+        self._sketch_segment_anchor: QPointF | None = None
         self._sketch_item: QGraphicsPathItem | None = None
+
+    @staticmethod
+    def _polar_snap_point(anchor: QPointF, point: QPointF, increment_deg: float = 15.0) -> QPointF:
+        """Project a cursor point onto the nearest CAD-style polar tracking ray."""
+        dx, dy = point.x() - anchor.x(), point.y() - anchor.y()
+        if hypot(dx, dy) <= 1e-12 or increment_deg <= 0.0:
+            return QPointF(point)
+        increment = radians(increment_deg)
+        snapped_angle = round(atan2(dy, dx) / increment) * increment
+        ux, uy = cos(snapped_angle), sin(snapped_angle)
+        distance = max(0.0, dx * ux + dy * uy)
+        return QPointF(anchor.x() + ux * distance, anchor.y() + uy * distance)
+
+    def _set_sketch_preview(self, preview: QPointF | None = None) -> None:
+        if not self._sketch_segments and self._sketch_segment_anchor is None:
+            return
+        path = QPainterPath()
+        for start, end in self._sketch_segments:
+            path.moveTo(start)
+            path.lineTo(end)
+        if self._sketch_segment_anchor is not None:
+            path.moveTo(self._sketch_segment_anchor)
+            if preview is not None and hypot(
+                preview.x() - self._sketch_segment_anchor.x(),
+                preview.y() - self._sketch_segment_anchor.y(),
+            ) > 1e-12:
+                path.lineTo(preview)
+        if self._sketch_item is None:
+            pen = QPen(QColor("#0ea5e9"), 0)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            self._sketch_item = self.scene().addPath(path, pen)
+            self._sketch_item.setZValue(30.0)
+        else:
+            self._sketch_item.setPath(path)
+
+    def begin_route_sketch(self) -> None:
+        self.set_placement_mode("route_sketch")
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _finish_route_sketch(self) -> None:
+        segments = [
+            (QPointF(start), QPointF(end)) for start, end in self._sketch_segments
+        ]
+        self.set_placement_mode(None)
+        if segments:
+            self.routeSegmentsSketched.emit(segments)
 
     def set_placement_mode(self, mode: str | None, default_heading: float = 0.0) -> None:
         if self._heading_line is not None and self._heading_line.scene() is self.scene():
@@ -119,6 +168,8 @@ class TrackingView(QGraphicsView):
             self.scene().removeItem(self._sketch_item)
         self._sketch_item = None
         self._sketch_points.clear()
+        self._sketch_segments.clear()
+        self._sketch_segment_anchor = None
         self._placement_mode = mode
         self._default_heading = default_heading
         if mode is None:
@@ -131,16 +182,22 @@ class TrackingView(QGraphicsView):
     def mousePressEvent(self, event) -> None:
         if self._placement_mode is not None:
             if event.button() == Qt.MouseButton.LeftButton:
-                self._placement_anchor = self.mapToScene(event.position().toPoint())
                 if self._placement_mode == "route_sketch":
-                    self._sketch_points = [self._placement_anchor]
-                    path = QPainterPath(self._placement_anchor)
-                    pen = QPen(QColor("#0ea5e9"), 0)
-                    pen.setStyle(Qt.PenStyle.DashLine)
-                    self._sketch_item = self.scene().addPath(path, pen)
-                    self._sketch_item.setZValue(30.0)
+                    current = self.mapToScene(event.position().toPoint())
+                    if self._sketch_segment_anchor is None:
+                        self._sketch_segment_anchor = current
+                    else:
+                        anchor = self._sketch_segment_anchor
+                        if not (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+                            current = self._polar_snap_point(anchor, current)
+                        minimum = max(0.01, 3.0 / max(self.transform().m11(), 1e-9))
+                        if hypot(current.x() - anchor.x(), current.y() - anchor.y()) >= minimum:
+                            self._sketch_segments.append((anchor, current))
+                        self._sketch_segment_anchor = None
+                    self._set_sketch_preview()
                     event.accept()
                     return
+                self._placement_anchor = self.mapToScene(event.position().toPoint())
                 placement_color = (
                     "#dc2626"
                     if self._placement_mode.endswith("reverse_action")
@@ -162,23 +219,21 @@ class TrackingView(QGraphicsView):
                 event.accept()
                 return
             if event.button() == Qt.MouseButton.RightButton:
+                if self._placement_mode == "route_sketch":
+                    self._finish_route_sketch()
+                    event.accept()
+                    return
                 self.set_placement_mode(None)
                 event.accept()
                 return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._placement_mode == "route_sketch" and self._sketch_item is not None:
+        if self._placement_mode == "route_sketch" and self._sketch_segment_anchor is not None:
             current = self.mapToScene(event.position().toPoint())
-            if not self._sketch_points or hypot(
-                current.x() - self._sketch_points[-1].x(),
-                current.y() - self._sketch_points[-1].y(),
-            ) >= max(0.01, 3.0 / max(self.transform().m11(), 1e-9)):
-                self._sketch_points.append(current)
-                path = QPainterPath(self._sketch_points[0])
-                for point in self._sketch_points[1:]:
-                    path.lineTo(point)
-                self._sketch_item.setPath(path)
+            if not (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+                current = self._polar_snap_point(self._sketch_segment_anchor, current)
+            self._set_sketch_preview(current)
             event.accept()
             return
         if self._placement_anchor is not None and self._heading_line is not None:
@@ -191,15 +246,7 @@ class TrackingView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if (
-            self._placement_mode == "route_sketch"
-            and self._placement_anchor is not None
-            and event.button() == Qt.MouseButton.LeftButton
-        ):
-            points = list(self._sketch_points)
-            self.set_placement_mode(None)
-            if len(points) >= 2:
-                self.routeSketched.emit(points)
+        if self._placement_mode == "route_sketch":
             event.accept()
             return
         if (
@@ -222,6 +269,18 @@ class TrackingView(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._placement_mode == "route_sketch":
+            if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+                self._finish_route_sketch()
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_Escape:
+                self.set_placement_mode(None)
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def wheelEvent(self, event) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
@@ -1149,6 +1208,7 @@ class VehicleTrackerWindow(QMainWindow):
         self._updating_operation_table = False
         self._selected_route_point_index: int | None = None
         self._current_route_section = "pre"
+        self._drawing_route_section = "full"
         self.active_route_index: int | None = None
         self._updating_route_combo = False
         self.poses = [self.start_pose]
@@ -1160,6 +1220,7 @@ class VehicleTrackerWindow(QMainWindow):
         self.view = TrackingView(self.scene)
         self.view.positionPlaced.connect(self.place_position)
         self.view.routeSketched.connect(self.create_route_from_sketch)
+        self.view.routeSegmentsSketched.connect(self.create_route_from_segments)
         self.timer = QTimer(self)
         self.timer.setInterval(80)
         self.timer.timeout.connect(self.advance_vehicle)
@@ -1292,17 +1353,19 @@ class VehicleTrackerWindow(QMainWindow):
             self._ribbon_button("stop", "Remove Path", self.remove_saved_route, "secondary"),
         ]))
         route_layout.addWidget(self._ribbon_group("Before drop-off", [
+            self._ribbon_button("add", "Draw Lines", lambda: self.begin_draw_route("pre"), "secondary"),
             self._ribbon_button("add", "Turn Point", lambda: self.begin_insert_route_point("pre")),
             self._ribbon_button("add", "Straight Point", lambda: self.begin_insert_straight_point("pre"), "secondary"),
             self._ribbon_button("left", "Reverse Action", lambda: self.begin_place_reverse_action("pre"), "warning"),
         ]))
         route_layout.addWidget(self._ribbon_group("After drop-off", [
+            self._ribbon_button("add", "Draw Lines", lambda: self.begin_draw_route("post"), "secondary"),
             self._ribbon_button("add", "Turn Point", lambda: self.begin_insert_route_point("post")),
             self._ribbon_button("add", "Straight Point", lambda: self.begin_insert_straight_point("post"), "secondary"),
             self._ribbon_button("left", "Reverse Action", lambda: self.begin_place_reverse_action("post"), "warning"),
         ]))
         route_layout.addWidget(self._ribbon_group("Edit path", [
-            self._ribbon_button("add", "Draw Route", self.begin_draw_route, "secondary"),
+            self._ribbon_button("add", "Draw Current", self.begin_draw_route, "secondary"),
             self._alignment_suggestion_button(),
             self._ribbon_button("stop", "Remove Point", self.remove_selected_route_point, "secondary"),
             self._ribbon_button("reset", "Clear Points", self.clear_route_points, "secondary"),
@@ -2764,15 +2827,180 @@ class VehicleTrackerWindow(QMainWindow):
     def begin_insert_route_point(self, section: str = "pre") -> None:
         self._begin_route_point_placement("route", section)
 
-    def begin_draw_route(self) -> None:
+    def begin_draw_route(self, section: str | None = None) -> None:
         if self.end_pose is None:
             QMessageBox.information(
                 self, "Place an end position", "Place the finish position before drawing a route."
             )
             return
-        self.view.set_placement_mode("route_sketch")
+        if self.dropoff_pose is not None:
+            if section not in {"pre", "post"}:
+                section = self._current_route_section
+        elif section in {"pre", "post"}:
+            QMessageBox.information(
+                self,
+                "Place a drop-off position",
+                "Place the drop-off position before drawing its approach or exit section.",
+            )
+            return
+        else:
+            section = "full"
+        self._drawing_route_section = section
+        if section in {"pre", "post"}:
+            self._current_route_section = section
+            if self.current_section_only_checkbox.isChecked():
+                self.redraw_dynamic_layers(self.form_profile())
+                self.redraw_route_handles()
+        self.view.begin_route_sketch()
+        section_label = {
+            "pre": "before-drop-off approach",
+            "post": "after-drop-off exit",
+            "full": "complete route",
+        }[section]
         self.statusBar().showMessage(
-            "Drag from the start toward the finish to sketch the route; release to calculate straight and turn points."
+            f"Drawing the {section_label} only: draw each straight independently with two clicks, then right-click or press Enter to apply the fillet."
+        )
+
+    @staticmethod
+    def _infinite_line_intersection(
+        first: tuple[tuple[float, float], tuple[float, float]],
+        second: tuple[tuple[float, float], tuple[float, float]],
+    ) -> tuple[float, float] | None:
+        (ax, ay), (bx, by) = first
+        (cx, cy), (dx, dy) = second
+        first_x, first_y = bx - ax, by - ay
+        second_x, second_y = dx - cx, dy - cy
+        denominator = first_x * second_y - first_y * second_x
+        scale = max(1.0, hypot(first_x, first_y) * hypot(second_x, second_y))
+        if abs(denominator) <= 1e-9 * scale:
+            return None
+        amount = ((cx - ax) * second_y - (cy - ay) * second_x) / denominator
+        return ax + amount * first_x, ay + amount * first_y
+
+    def create_route_from_segments(
+        self, scene_segments: list[tuple[QPointF, QPointF]]
+    ) -> None:
+        if self.end_pose is None or not scene_segments:
+            return
+        segments = [
+            (
+                (float(start.x()), float(-start.y())),
+                (float(end.x()), float(-end.y())),
+            )
+            for start, end in scene_segments
+        ]
+        section = getattr(self, "_drawing_route_section", "full")
+        if section == "pre" and self.dropoff_pose is not None:
+            section_start = self.start_pose
+            section_end = self.dropoff_pose
+        elif section == "post" and self.dropoff_pose is not None:
+            section_start = self.dropoff_pose
+            section_end = self.end_pose
+        else:
+            section = "full"
+            section_start = self.start_pose
+            section_end = self.end_pose
+        if len(segments) == 1:
+            vertices = [
+                (section_start.x, section_start.y),
+                (section_end.x, section_end.y),
+            ]
+        else:
+            intersections: list[tuple[float, float]] = []
+            for first, second in zip(segments, segments[1:]):
+                intersection = self._infinite_line_intersection(first, second)
+                if intersection is None:
+                    QMessageBox.information(
+                        self,
+                        "Cannot fillet parallel lines",
+                        "Two consecutive straight sections are parallel and do not form a corner. Redraw either section at a different angle.",
+                    )
+                    return
+                intersections.append(intersection)
+            vertices = [
+                (section_start.x, section_start.y),
+                *intersections,
+                (section_end.x, section_end.y),
+            ]
+        if section in {"pre", "post"}:
+            self._replace_route_section_from_vertices(vertices, section)
+            return
+        self.create_route_from_sketch(
+            [QPointF(x, -y) for x, y in vertices]
+        )
+
+    def _replace_route_section_from_vertices(
+        self, vertices: list[tuple[float, float]], section: str
+    ) -> None:
+        profile = self.form_profile()
+        connected_nodes, section_modes = self._connect_straight_sketch(
+            vertices, profile.effective_min_turning_radius
+        )
+        replacement = list(connected_nodes[1:-1])
+        split = self._effective_dropoff_waypoint_index()
+        if section == "pre":
+            delta = len(replacement) - split
+            self.route_waypoints = [*replacement, *self.route_waypoints[split:]]
+            self.route_point_turns = {
+                index + delta for index in self.route_point_turns if index >= split
+            }
+            self.route_reversing_actions = {
+                index + delta for index in self.route_reversing_actions if index >= split
+            }
+            self.route_tangent_handles = {
+                index + delta: vector
+                for index, vector in self.route_tangent_handles.items()
+                if index >= split
+            }
+            preserved_modes = {
+                index + delta: mode
+                for index, mode in self.route_point_path_modes.items()
+                if index >= split
+            }
+            new_modes = {
+                index: mode
+                for index, mode in section_modes.items()
+                if index <= len(replacement)
+            }
+            self.route_dropoff_waypoint_index = len(replacement)
+        else:
+            self.route_waypoints = [*self.route_waypoints[:split], *replacement]
+            self.route_point_turns = {
+                index for index in self.route_point_turns if index < split
+            }
+            self.route_reversing_actions = {
+                index for index in self.route_reversing_actions if index < split
+            }
+            self.route_tangent_handles = {
+                index: vector
+                for index, vector in self.route_tangent_handles.items()
+                if index < split
+            }
+            preserved_modes = {
+                index: mode
+                for index, mode in self.route_point_path_modes.items()
+                if index < split
+            }
+            new_modes = {
+                split + index: mode
+                for index, mode in section_modes.items()
+                if index < len(replacement)
+            }
+            self.route_dropoff_waypoint_index = split
+        self.route_point_path_modes = {**preserved_modes, **new_modes}
+        self.stop_route_animation()
+        self._selected_route_point_index = (
+            0 if section == "pre" and replacement else
+            split if section == "post" and replacement else None
+        )
+        self.redraw_dynamic_layers(profile)
+        self.redraw_route_handles()
+        self._refresh_route_operations_table()
+        self._update_navigation_bounds()
+        arc_count = sum(mode == "minimum_radius" for mode in new_modes.values())
+        side = "before" if section == "pre" else "after"
+        self.statusBar().showMessage(
+            f"Replaced only the {side}-drop-off section ({len(replacement)} points, {arc_count} fillet arc(s)); the other section was preserved."
         )
 
     @staticmethod
@@ -2808,23 +3036,33 @@ class VehicleTrackerWindow(QMainWindow):
             return
         profile = self.form_profile()
         sampled = [(float(point.x()), float(-point.y())) for point in scene_points]
-        sampled[0] = (self.start_pose.x, self.start_pose.y)
-        sampled[-1] = (self.end_pose.x, self.end_pose.y)
-        stroke_span = hypot(
-            max(point[0] for point in sampled) - min(point[0] for point in sampled),
-            max(point[1] for point in sampled) - min(point[1] for point in sampled),
-        )
-        tolerance = max(
-            0.02,
-            min(
-                max(profile.width * 0.12, profile.length * 0.025),
-                max(stroke_span * 0.015, 0.02),
-            ),
-        )
-        simplified = self._simplify_route_sketch(sampled, tolerance)
-        if len(simplified) > 32:
-            stride = ceil((len(simplified) - 2) / 30.0)
-            simplified = [simplified[0], *simplified[1:-1:stride], simplified[-1]]
+        start = (self.start_pose.x, self.start_pose.y)
+        finish = (self.end_pose.x, self.end_pose.y)
+        if hypot(sampled[0][0] - start[0], sampled[0][1] - start[1]) <= 1e-6:
+            sampled[0] = start
+        else:
+            sampled.insert(0, start)
+        if hypot(sampled[-1][0] - finish[0], sampled[-1][1] - finish[1]) <= 1e-6:
+            sampled[-1] = finish
+        else:
+            sampled.append(finish)
+
+        # Clicked CAD vertices are intentional. Remove only duplicate clicks and
+        # exactly collinear middle points rather than simplifying their geometry.
+        simplified: list[tuple[float, float]] = []
+        for point in sampled:
+            if simplified and hypot(point[0] - simplified[-1][0], point[1] - simplified[-1][1]) <= 1e-9:
+                continue
+            simplified.append(point)
+            while len(simplified) >= 3:
+                a, b, c = simplified[-3:]
+                ab = (b[0] - a[0], b[1] - a[1])
+                bc = (c[0] - b[0], c[1] - b[1])
+                cross = ab[0] * bc[1] - ab[1] * bc[0]
+                dot = ab[0] * bc[0] + ab[1] * bc[1]
+                if abs(cross) > 1e-9 * max(1.0, hypot(*ab) * hypot(*bc)) or dot < 0.0:
+                    break
+                simplified.pop(-2)
         self.stop_route_animation()
         connected_nodes, section_modes = self._connect_straight_sketch(
             simplified, profile.effective_min_turning_radius
@@ -2846,7 +3084,7 @@ class VehicleTrackerWindow(QMainWindow):
         straight_count = sum(mode == "straight" for mode in self.route_point_path_modes.values())
         turn_count = sum(mode == "minimum_radius" for mode in self.route_point_path_modes.values())
         self.statusBar().showMessage(
-            f"Connected {straight_count} drawn straight section(s) with {turn_count} minimum-radius turn(s)."
+            f"Created {straight_count} snapped straight section(s) with {turn_count} tangent minimum-radius arc(s)."
         )
 
     @staticmethod
@@ -2855,14 +3093,53 @@ class VehicleTrackerWindow(QMainWindow):
     ) -> tuple[list[tuple[float, float]], dict[int, str]]:
         if len(vertices) < 2:
             return vertices, {}
+        straight_modes = {index: "straight" for index in range(len(vertices) - 1)}
+        nodes, modes, _index_map = VehicleTrackerWindow._fillet_connected_straights(
+            vertices, straight_modes, radius, set()
+        )
+        return nodes, modes
+
+    @staticmethod
+    def _fillet_connected_straights(
+        vertices: list[tuple[float, float]],
+        segment_modes: dict[int, str],
+        radius: float,
+        protected_waypoint_indices: set[int],
+    ) -> tuple[
+        list[tuple[float, float]],
+        dict[int, str],
+        dict[int, int],
+    ]:
+        """Trim connected straight legs and insert tangent circular-arc sections."""
+        if len(vertices) < 2:
+            return list(vertices), {}, {}
         nodes = [vertices[0]]
         modes: list[str] = []
-        for index in range(1, len(vertices) - 1):
-            previous, corner, following = vertices[index - 1], vertices[index], vertices[index + 1]
+        waypoint_index_map: dict[int, int] = {}
+        for node_index in range(1, len(vertices) - 1):
+            waypoint_index = node_index - 1
+            previous, corner, following = (
+                vertices[node_index - 1],
+                vertices[node_index],
+                vertices[node_index + 1],
+            )
+            incoming_mode = segment_modes.get(node_index - 1, "turn")
+            outgoing_mode = segment_modes.get(node_index, "turn")
             incoming = (corner[0] - previous[0], corner[1] - previous[1])
             outgoing = (following[0] - corner[0], following[1] - corner[1])
             incoming_length, outgoing_length = hypot(*incoming), hypot(*outgoing)
-            if incoming_length < 1e-9 or outgoing_length < 1e-9:
+            can_fillet = (
+                radius > 1e-9
+                and waypoint_index not in protected_waypoint_indices
+                and incoming_mode == "straight"
+                and outgoing_mode == "straight"
+                and incoming_length >= 1e-9
+                and outgoing_length >= 1e-9
+            )
+            if not can_fillet:
+                modes.append(incoming_mode)
+                nodes.append(corner)
+                waypoint_index_map[waypoint_index] = len(nodes) - 2
                 continue
             in_unit = (incoming[0] / incoming_length, incoming[1] / incoming_length)
             out_unit = (outgoing[0] / outgoing_length, outgoing[1] / outgoing_length)
@@ -2872,8 +3149,9 @@ class VehicleTrackerWindow(QMainWindow):
             ))
             tangent_distance = radius * abs(tan(turn_angle / 2.0))
             if turn_angle < radians(2.0) or tangent_distance >= min(incoming_length, outgoing_length) * 0.48:
+                modes.append(incoming_mode)
                 nodes.append(corner)
-                modes.append("straight")
+                waypoint_index_map[waypoint_index] = len(nodes) - 2
                 continue
             entry = (
                 corner[0] - in_unit[0] * tangent_distance,
@@ -2884,10 +3162,15 @@ class VehicleTrackerWindow(QMainWindow):
                 corner[1] + out_unit[1] * tangent_distance,
             )
             nodes.extend((entry, exit_point))
-            modes.extend(("straight", "minimum_radius"))
+            modes.extend((incoming_mode, "minimum_radius"))
+            waypoint_index_map[waypoint_index] = len(nodes) - 2
         nodes.append(vertices[-1])
-        modes.append("straight")
-        return nodes, {index: mode for index, mode in enumerate(modes)}
+        modes.append(segment_modes.get(len(vertices) - 2, "turn"))
+        return (
+            nodes,
+            {index: mode for index, mode in enumerate(modes)},
+            waypoint_index_map,
+        )
 
     def begin_insert_straight_point(self, section: str = "pre") -> None:
         self._begin_route_point_placement("straight_route", section)
@@ -5657,14 +5940,49 @@ class VehicleTrackerWindow(QMainWindow):
             tangent_handles = {
                 remap(index): vector for index, vector in tangent_handles.items()
             }
+            boundary_mode = point_path_modes.get(dropoff_waypoint_index)
             point_path_modes = {
                 remap(index): mode for index, mode in point_path_modes.items()
             }
+            if boundary_mode is not None:
+                # The inserted drop-off divides one stored section boundary into
+                # an approach segment and an exit segment. Keep both linear.
+                point_path_modes[dropoff_waypoint_index] = boundary_mode
             route_waypoints.insert(
                 dropoff_waypoint_index, (dropoff_pose.x, dropoff_pose.y)
             )
             reversing_action_indices.add(dropoff_waypoint_index)
         nodes = [(start.x, start.y), *route_waypoints, (end.x, end.y)]
+        protected_waypoints = (
+            set(point_turn_indices)
+            | set(reversing_action_indices)
+            | set(tangent_handles)
+        )
+        if dropoff_waypoint_index is not None:
+            protected_waypoints.add(dropoff_waypoint_index)
+        nodes, point_path_modes, waypoint_index_map = self._fillet_connected_straights(
+            nodes,
+            point_path_modes,
+            self.form_profile().effective_min_turning_radius,
+            protected_waypoints,
+        )
+        point_turn_indices = {
+            waypoint_index_map[index]
+            for index in point_turn_indices
+            if index in waypoint_index_map
+        }
+        reversing_action_indices = {
+            waypoint_index_map[index]
+            for index in reversing_action_indices
+            if index in waypoint_index_map
+        }
+        tangent_handles = {
+            waypoint_index_map[index]: vector
+            for index, vector in tangent_handles.items()
+            if index in waypoint_index_map
+        }
+        if dropoff_waypoint_index is not None:
+            dropoff_waypoint_index = waypoint_index_map.get(dropoff_waypoint_index)
         if all(hypot(b[0] - a[0], b[1] - a[1]) < 1e-9 for a, b in zip(nodes, nodes[1:])):
             return []
         segment_directions: list[int] = []

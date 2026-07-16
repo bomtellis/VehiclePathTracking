@@ -790,7 +790,7 @@
         "heading_deg": -90.0
       },
       "tangent_handles": {},
-      "payload_action": "stop",
+      "payload_action": "none",
       "operations": [
         {
           "location": "start",
