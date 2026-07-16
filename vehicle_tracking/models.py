@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from math import cos, radians, sin, tan
+from math import cos, hypot, radians, sin, sqrt, tan
 from pathlib import Path
 from typing import Any
 import json
@@ -79,6 +79,8 @@ class VehicleProfile:
     payload_length: float = 1.2
     payload_width: float = 1.0
     payload_rotation_deg: float = 0.0
+    load_distance: float = 0.0
+    aisle_clearance: float = 200.0
     wheels: list[WheelSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -124,6 +126,8 @@ class VehicleProfile:
             payload_length=float(data.get("payload_length", 1.2)),
             payload_width=float(data.get("payload_width", 1.0)),
             payload_rotation_deg=float(data.get("payload_rotation_deg", 0.0)),
+            load_distance=float(data.get("load_distance", 0.0)),
+            aisle_clearance=float(data.get("aisle_clearance", 200.0)),
             wheels=[WheelSpec.from_dict(item) for item in data.get("wheels", [])],
         )
 
@@ -145,20 +149,23 @@ class VehicleProfile:
             "payload_length": self.payload_length,
             "payload_width": self.payload_width,
             "payload_rotation_deg": self.payload_rotation_deg,
+            "load_distance": self.load_distance,
+            "aisle_clearance": self.aisle_clearance,
             "wheels": [wheel.to_dict() for wheel in self.wheels],
         }
 
     @property
     def calculated_min_turning_radius(self) -> float:
-        """Theoretical minimum centre-path radius for the configured steering method."""
+        """Theoretical radius followed by the vehicle origin."""
         angle = max(0.1, min(abs(self.max_steering_angle_deg), 89.0))
         tangent = max(0.001, abs(tan(radians(angle))))
         wheelbase = max(abs(self.wheelbase), 0.001)
-        if self.steering_mode in {
-            SteeringMode.ACKERMANN_FRONT,
-            SteeringMode.ACKERMANN_REAR,
-        }:
+        if self.steering_mode == SteeringMode.ACKERMANN_FRONT:
             return wheelbase / tangent
+        if self.steering_mode == SteeringMode.ACKERMANN_REAR:
+            fixed_axle_x = self.fixed_axle_x
+            axle_radius = wheelbase / tangent
+            return hypot(axle_radius, fixed_axle_x)
         if self.steering_mode == SteeringMode.FOUR_WHEEL:
             # Equal front/rear steering in opposite phase doubles yaw contribution.
             return wheelbase / (2.0 * tangent)
@@ -168,11 +175,10 @@ class VehicleProfile:
     @property
     def turning_radius_calculation(self) -> str:
         angle = max(0.1, min(abs(self.max_steering_angle_deg), 89.0))
-        if self.steering_mode in {
-            SteeringMode.ACKERMANN_FRONT,
-            SteeringMode.ACKERMANN_REAR,
-        }:
+        if self.steering_mode == SteeringMode.ACKERMANN_FRONT:
             return f"R = wheelbase / tan({angle:.1f} deg)"
+        if self.steering_mode == SteeringMode.ACKERMANN_REAR:
+            return "Rcentre = sqrt((wheelbase / tan(steer))^2 + fixed-axle offset^2)"
         if self.steering_mode == SteeringMode.FOUR_WHEEL:
             return f"R = wheelbase / (2 x tan({angle:.1f} deg))"
         if self.steering_mode == SteeringMode.DIFFERENTIAL:
@@ -182,6 +188,63 @@ class VehicleProfile:
     @property
     def effective_min_turning_radius(self) -> float:
         return max(0.0, self.min_turning_radius, self.calculated_min_turning_radius)
+
+    @property
+    def fixed_axle_x(self) -> float:
+        fixed = [wheel.x for wheel in self.wheels if not wheel.steerable]
+        if fixed:
+            return sum(fixed) / len(fixed)
+        return self.wheelbase / 2.0
+
+    @property
+    def calculated_outer_turning_radius(self) -> float:
+        """Toyota Wa-style radius to the furthest truck/load corner for rear steer."""
+        if self.steering_mode != SteeringMode.ACKERMANN_REAR:
+            return self.calculated_min_turning_radius + self.width / 2.0
+        icr_x = self.fixed_axle_x
+        centre_radius = self.effective_min_turning_radius
+        lateral_icr = sqrt(max(centre_radius * centre_radius - icr_x * icr_x, 0.0))
+        corners = [
+            (x, y)
+            for x in (-self.length / 2.0, self.length / 2.0)
+            for y in (-self.width / 2.0, self.width / 2.0)
+        ]
+        if self.payload_enabled:
+            rotation = radians(self.payload_rotation_deg)
+            for local_x in (-self.payload_length / 2.0, self.payload_length / 2.0):
+                for local_y in (-self.payload_width / 2.0, self.payload_width / 2.0):
+                    corners.append((
+                        self.payload_x + local_x * cos(rotation) - local_y * sin(rotation),
+                        self.payload_y + local_x * sin(rotation) + local_y * cos(rotation),
+                    ))
+        return max(
+            hypot(x - icr_x, y - lateral_icr)
+            for x, y in corners
+        )
+
+    @property
+    def pallet_truck_aisle_width(self) -> float:
+        """Toyota pallet/reach-truck Ast formula."""
+        rotation = radians(self.payload_rotation_deg)
+        load_length = (
+            abs(cos(rotation)) * self.payload_length
+            + abs(sin(rotation)) * self.payload_width
+            if self.payload_enabled else 0.0
+        )
+        load_width = (
+            abs(sin(rotation)) * self.payload_length
+            + abs(cos(rotation)) * self.payload_width
+            if self.payload_enabled else self.width
+        )
+        load_distance = self.load_distance
+        if self.payload_enabled and load_distance <= 0.0:
+            load_rear_face_x = self.payload_x - load_length / 2.0
+            load_distance = max(0.0, load_rear_face_x - self.fixed_axle_x)
+        return (
+            self.calculated_outer_turning_radius
+            + sqrt((load_length - load_distance) ** 2 + (load_width / 2.0) ** 2)
+            + max(0.0, self.aisle_clearance)
+        )
 
     @property
     def max_turn_curvature(self) -> float:
@@ -354,7 +417,7 @@ class RoutePlan:
             point_path_modes={
                 int(index): str(mode)
                 for index, mode in data.get("point_path_modes", {}).items()
-                if str(index).isdigit() and str(mode) in {"straight", "turn"}
+                if str(index).isdigit() and str(mode) in {"straight", "turn", "minimum_radius"}
             },
             dropoff_waypoint_index=(
                 max(0, int(data["dropoff_waypoint_index"]))
@@ -384,7 +447,7 @@ class RoutePlan:
                 operation.waypoint_index: operation.operation
                 for operation in plan.operations
                 if operation.location == "waypoint"
-                and operation.operation in {"straight", "turn"}
+                and operation.operation in {"straight", "turn", "minimum_radius"}
                 and operation.waypoint_index is not None
             }
         return plan

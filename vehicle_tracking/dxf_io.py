@@ -282,6 +282,7 @@ def export_tracking_dxf(
     progress_callback: Callable[[int, str], None] | None = None,
     planned_routes: list[list[Pose]] | None = None,
     planned_route_names: list[str] | None = None,
+    block_source_path: Path | None = None,
 ) -> None:
     def report(value: int, message: str) -> None:
         if progress_callback is not None:
@@ -293,11 +294,16 @@ def export_tracking_dxf(
         report(10, "Reading source coordinate metadata")
         source_doc = ezdxf.readfile(source_path)
         _copy_coordinate_metadata(source_doc, doc)
-        if profile.dxf_block_name and profile.dxf_block_name in source_doc.blocks:
-            report(20, "Importing selected vehicle block")
-            importer = Importer(source_doc, doc)
-            importer.import_block(profile.dxf_block_name, rename=False)
-            importer.finalize()
+    block_doc = None
+    if block_source_path and block_source_path.exists():
+        block_doc = ezdxf.readfile(block_source_path)
+    elif source_path and source_path.exists():
+        block_doc = source_doc
+    if block_doc is not None and profile.dxf_block_name in block_doc.blocks:
+        report(20, "Importing selected vehicle block")
+        importer = Importer(block_doc, doc)
+        importer.import_block(profile.dxf_block_name, rename=False)
+        importer.finalize()
     msp = doc.modelspace()
     report(30, "Creating tracking layers")
     _ensure_layers(doc)
