@@ -17,7 +17,7 @@ Complete multi-floor jobs can be saved as `.vtproject` files. A project contains
 - Import DXF geometry for visual reference.
 - Render nested blocks, dimensions, bulged polylines, splines, ellipses, text, and other decomposable DXF geometry.
 - Render DXF `TEXT`, `MTEXT`, `ATTRIB`, and `ATTDEF` as real Arial text objects, retaining insertion, alignment, rotation, width factor, multiline content, and character height in drawing units instead of flattening characters into placeholder rectangles.
-- Lazy-load a floor DXF only when that floor becomes active, cache it for later switches, and show phased modal progress while reading, scanning, measuring, and converting large drawings. Floor assignments are not parsed while the management dialog is open.
+- Lazy-load a floor DXF only when that floor becomes active, cache both its parsed data and rendered scene entities for later switches, and show phased modal progress while reading, scanning, measuring, and converting large drawings. Floor assignments are not parsed while the management dialog is open.
 - Pan across an expanded canvas, zoom with the mouse wheel, and use **Fit DXF** to return to the full drawing.
 - Place persistent start and end positions directly on the DXF; placing the start resets the vehicle path there.
 - Orient start and end poses by dragging in the required facing direction, or enter exact heading angles afterward.
@@ -31,7 +31,10 @@ Complete multi-floor jobs can be saved as `.vtproject` files. A project contains
 - Use **Settings** on the Home ribbon to select System, Light, or Dark mode and optionally override the DXF canvas background colour; appearance preferences persist between launches.
 - Open and save complete `.vtproject` files from the Home ribbon. Legacy DXFs can still be opened directly to start a new project.
 - Insert draggable orange control points on the planned route to tighten or reshape individual sections; selected points can be removed or all points cleared.
-- Draw the before-drop-off approach and after-drop-off exit independently: each section has its own **Draw Lines** action, uses isolated two-click CAD lines with polar snapping, and replaces only that section when its intersections and tangent fillets are applied.
+- Draw the before-drop-off approach and after-drop-off exit independently: each section has its own **Draw Lines** action and uses an AutoCAD-style connected line chain with 15-degree polar tracking, endpoint snaps, and apparent-extension alignment through Start, Drop-off, and Finish.
+- Finishing **Draw Lines** retains only a CAD sketch and does not recalculate the vehicle route. Enable **Edit Lines** to move its circular vertex grips or translate a whole line with a wide blue grip, then use **Create Nav Points** when ready to transform the sketch into navigation points.
+- Select a corner grip and use **Fillet Corner** to enter an exact tangent-arc radius. Select either grip of an existing fillet and run the command again to change its stored radius; values below the vehicle's feasible minimum remain allowed for layout work but are marked infeasible by the route checker.
+- Toggle **Straight Start**, **Straight Drop-off**, or **Straight Finish** to switch the adjacent route legs between exact linear travel and the normal steering curve. Use the matching **Finalise** action to enter straight departure, delivery/reverse-egress, or finish-approach distances and create or update inline waypoints, including reverse travel orientation when applicable.
 - Drag the paired blue curve handlebars on every ordinary route point to control tangent direction and strength for both adjoining curve sections; custom tangents persist with routes and projects.
 - Right-click a route point to enable a purple driven-wheel point turn. The planner rotates the vehicle at that position using the configured steering angle and checks that the profile has driven steerable wheels (or differential drive).
 - Use **Place Reverse Action** and click the planned route to add a red gear-change point. Travel after the point is reversed; placing another reversing action changes back to forward travel.
@@ -56,6 +59,8 @@ Complete multi-floor jobs can be saved as `.vtproject` files. A project contains
 - Detect DXF block inserts and use a block name as the vehicle symbol when exporting.
 - Configure vehicle dimensions, wheel positions, steering type, steering angle, turning radius, speed, and pose spacing.
 - Calculate and apply the theoretical minimum centre-path turning radius for each steering method: front/rear Ackermann use `wheelbase / tan(angle)`, equal-and-opposite four-wheel steering uses `wheelbase / (2 x tan(angle))`, and differential/omni running gear can reorient with a zero centre-path radius. The planner uses the larger of this value and any configured safety radius.
+- Select **Crab steer (parallel wheels)** for a crab-capable four-wheel-steering profile, then choose **Crab movement** on only the required route sections in the operations table. Enter the vehicle heading required at the start and end of each selected movement; equal headings create pure fixed-heading translation, while differing headings create a checked coordinated orientation transition. All other legs retain normal counter-phase four-wheel steering.
+- Treat an equal-heading crab section as zero curvature with an infinite turning radius: its instantaneous centre of rotation is at infinity. A section with different start/end headings is checked as a coordinated 4WS transition against the profile's finite curvature and steering-angle limits.
 - Interactively steer with the toolbar, sliders, or keyboard:
   - `W` / `S`: forward / reverse
   - `A` / `D`: steer left / right

@@ -5,17 +5,17 @@
     "Level 1",
     "Level 2",
     "Level 3",
-    "Level 4",
     "Level 5",
-    "Level 6"
+    "Level 6",
+    "Level 4"
   ],
   "level_drawings": {
     "Level 1": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-00-DG-AR-300001.dxf",
     "Level 2": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-01-DG-AR-300002.dxf",
     "Level 3": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-02-DG-AR-300003.dxf",
-    "Level 4": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-03-DG-AR-300004.dxf",
     "Level 5": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-04-DG-AR-300005.dxf",
-    "Level 6": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-05-DG-AR-300006.dxf"
+    "Level 6": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-05-DG-AR-300006.dxf",
+    "Level 4": "..\\..\\Downloads\\DXF\\DXF\\LHC-RYD-MB-03-DG-AR-300004.dxf"
   },
   "start_positions": [
     {
@@ -42,6 +42,24 @@
       "pose": {
         "x": 88633.53110031965,
         "y": -88333.21790044435,
+        "heading_deg": -90.0
+      }
+    },
+    {
+      "name": "Start 4",
+      "level_name": "Level 2",
+      "pose": {
+        "x": 140555.18607237042,
+        "y": -88330.51062330735,
+        "heading_deg": -90.0
+      }
+    },
+    {
+      "name": "Level 4 Lift",
+      "level_name": "Level 4",
+      "pose": {
+        "x": 137926.65283665626,
+        "y": -88472.58553331044,
         "heading_deg": -90.0
       }
     }
@@ -483,9 +501,9 @@
     {
       "name": "Path 5",
       "end_pose": {
-        "x": 129776.02036533144,
-        "y": -75629.86483154926,
-        "heading_deg": 180.0
+        "x": 142380.61703164835,
+        "y": -75476.79927752716,
+        "heading_deg": 0.0
       },
       "waypoints": [
         [
@@ -505,8 +523,8 @@
           -74934.83471517134
         ],
         [
-          136490.64308854355,
-          -74687.96598971004
+          134849.87397596578,
+          -74845.96597832863
         ]
       ],
       "point_turn_indices": [],
@@ -619,8 +637,8 @@
           -89745.84622644314
         ],
         [
-          77927.36824779706,
-          -90614.18553153651
+          78067.13746849814,
+          -90642.13937567672
         ],
         [
           77113.91798786233,
@@ -631,19 +649,25 @@
           -86803.84579493736
         ],
         [
-          78228.01002807479,
-          -84970.64488757103
+          78214.03310600467,
+          -84984.62180964112
         ],
         [
-          80585.0876648319,
-          -84893.16897899966
+          81034.38361908929,
+          -84929.31345800142
         ],
         [
-          89599.89467943338,
-          -84904.95123781853
+          85230.78660154527,
+          -84719.7013010913
+        ],
+        [
+          92083.51481549935,
+          -84605.9490163081
         ]
       ],
-      "point_turn_indices": [],
+      "point_turn_indices": [
+        13
+      ],
       "reversing_action_indices": [
         0,
         7
@@ -667,6 +691,14 @@
         "5": [
           -2534.5492159801797,
           -945.8644455407339
+        ],
+        "10": [
+          105.37126458709827,
+          2012.5034002055763
+        ],
+        "13": [
+          1113.757937314891,
+          -1176.315634893719
         ]
       },
       "payload_action": "none",
@@ -752,6 +784,11 @@
           "waypoint_index": 12
         },
         {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 13
+        },
+        {
           "location": "end",
           "operation": "stop",
           "waypoint_index": null
@@ -779,23 +816,71 @@
         "y": -88545.78119155517,
         "heading_deg": -90.0
       },
-      "waypoints": [],
+      "waypoints": [
+        [
+          140536.3906269841,
+          -84052.90626382049
+        ],
+        [
+          142488.18865817666,
+          -85554.91813419144
+        ],
+        [
+          145043.45241519378,
+          -85537.76216834321
+        ],
+        [
+          147076.14298347026,
+          -84661.15647951461
+        ]
+      ],
       "point_turn_indices": [],
-      "reversing_action_indices": [],
+      "reversing_action_indices": [
+        0
+      ],
       "level_name": "Level 2",
       "start_position_name": "Start 3",
       "start_pose": {
-        "x": 140521.0197528678,
-        "y": -88545.45680231975,
+        "x": 140560.19277097937,
+        "y": -88297.36102094664,
         "heading_deg": -90.0
       },
-      "tangent_handles": {},
+      "tangent_handles": {
+        "1": [
+          3827.950797931291,
+          -454.03688532992965
+        ],
+        "3": [
+          1332.146938191203,
+          2610.4683951718325
+        ]
+      },
       "payload_action": "none",
       "operations": [
         {
           "location": "start",
           "operation": "reverse",
           "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "waypoint",
+          "operation": "straight",
+          "waypoint_index": 2
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 3
         },
         {
           "location": "dropoff",
@@ -814,12 +899,394 @@
         }
       ],
       "dropoff_pose": {
-        "x": 147710.77178798316,
-        "y": -80931.73583317228,
+        "x": 147593.25273364858,
+        "y": -80957.85117857996,
         "heading_deg": 90.0
       },
-      "point_path_modes": {},
-      "dropoff_waypoint_index": 0
+      "point_path_modes": {
+        "2": "straight"
+      },
+      "dropoff_waypoint_index": 4
+    },
+    {
+      "name": "Best case",
+      "end_pose": {
+        "x": 135085.8450513065,
+        "y": -75456.34237076995,
+        "heading_deg": 180.0
+      },
+      "waypoints": [
+        [
+          148405.55975892712,
+          -75615.27401838399
+        ],
+        [
+          141641.6685341576,
+          -75622.30817993291
+        ],
+        [
+          141636.35574876232,
+          -75408.6673438783
+        ],
+        [
+          141636.43230989418,
+          -75449.81966236942
+        ]
+      ],
+      "point_turn_indices": [
+        1,
+        3
+      ],
+      "reversing_action_indices": [
+        2
+      ],
+      "level_name": "Level 1",
+      "start_position_name": "Start 1",
+      "start_pose": {
+        "x": 153913.42847268208,
+        "y": -75662.48747686831,
+        "heading_deg": 180.0
+      },
+      "tangent_handles": {},
+      "payload_action": "none",
+      "operations": [
+        {
+          "location": "start",
+          "operation": "travel",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "straight",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "dropoff",
+          "operation": "dropoff",
+          "waypoint_index": null
+        },
+        {
+          "location": "dropoff",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse",
+          "waypoint_index": 2
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 3
+        },
+        {
+          "location": "end",
+          "operation": "stop",
+          "waypoint_index": null
+        }
+      ],
+      "dropoff_pose": {
+        "x": 141642.67863726034,
+        "y": -77687.17310806,
+        "heading_deg": -90.0
+      },
+      "point_path_modes": {
+        "0": "straight"
+      },
+      "dropoff_waypoint_index": 2
+    },
+    {
+      "name": "Path 7",
+      "end_pose": {
+        "x": 140545.388029225,
+        "y": -88257.88318910929,
+        "heading_deg": -90.0
+      },
+      "waypoints": [
+        [
+          137048.4623713412,
+          -84198.85999888822
+        ],
+        [
+          137906.4146404313,
+          -85031.40636766971
+        ],
+        [
+          142467.02376956848,
+          -85005.44985267759
+        ],
+        [
+          142427.89934736147,
+          -78088.07977634933
+        ],
+        [
+          143248.2748434235,
+          -78102.00933454798
+        ],
+        [
+          142034.49845041358,
+          -77753.8055353281
+        ],
+        [
+          142759.59279487,
+          -80413.07285651601
+        ],
+        [
+          142560.37145855348,
+          -83746.05940264963
+        ],
+        [
+          140567.7181821019,
+          -85227.51275062404
+        ]
+      ],
+      "point_turn_indices": [],
+      "reversing_action_indices": [
+        0,
+        5
+      ],
+      "level_name": "Level 4",
+      "start_position_name": "Level 4 Lift",
+      "start_pose": {
+        "x": 137057.7313872608,
+        "y": -88222.7157944532,
+        "heading_deg": -90.0
+      },
+      "tangent_handles": {
+        "1": [
+          2874.856614630349,
+          1472.7741029010504
+        ],
+        "6": [
+          552.119615256699,
+          -4496.525848513396
+        ],
+        "7": [
+          -903.7038861070469,
+          -1914.3735140548088
+        ],
+        "8": [
+          -983.366322152986,
+          -1800.8197040469968
+        ]
+      },
+      "payload_action": "stop",
+      "operations": [
+        {
+          "location": "start",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 2
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 3
+        },
+        {
+          "location": "dropoff",
+          "operation": "dropoff",
+          "waypoint_index": null
+        },
+        {
+          "location": "dropoff",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 4
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse",
+          "waypoint_index": 5
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 6
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 7
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 8
+        },
+        {
+          "location": "end",
+          "operation": "stop",
+          "waypoint_index": null
+        }
+      ],
+      "dropoff_pose": {
+        "x": 145099.96848077723,
+        "y": -78097.111066847,
+        "heading_deg": 0.0
+      },
+      "point_path_modes": {
+        "9": "line"
+      },
+      "dropoff_waypoint_index": 4
+    },
+    {
+      "name": "Path 8",
+      "end_pose": {
+        "x": 140542.90008428664,
+        "y": -88270.47383696273,
+        "heading_deg": -90.0
+      },
+      "waypoints": [
+        [
+          137038.43592222175,
+          -84442.34620025507
+        ],
+        [
+          138512.79185267622,
+          -85646.78322864258
+        ],
+        [
+          141875.54745729125,
+          -85581.7630673173
+        ],
+        [
+          142572.05748215213,
+          -82418.8636914268
+        ],
+        [
+          143033.31617244802,
+          -82062.02306940011
+        ],
+        [
+          142113.45053470889,
+          -81695.8486654978
+        ],
+        [
+          142313.29541490923,
+          -83742.74921980365
+        ],
+        [
+          140579.4626918488,
+          -85423.12906512203
+        ]
+      ],
+      "point_turn_indices": [],
+      "reversing_action_indices": [
+        0,
+        5
+      ],
+      "level_name": "Level 4",
+      "start_position_name": "Level 4 Lift",
+      "start_pose": {
+        "x": 137010.80563500404,
+        "y": -88305.94017570937,
+        "heading_deg": -90.0
+      },
+      "tangent_handles": {
+        "2": [
+          1424.7409963341197,
+          1369.6528176328284
+        ]
+      },
+      "payload_action": "none",
+      "operations": [
+        {
+          "location": "start",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 2
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 3
+        },
+        {
+          "location": "dropoff",
+          "operation": "dropoff",
+          "waypoint_index": null
+        },
+        {
+          "location": "dropoff",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 4
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse",
+          "waypoint_index": 5
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 6
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 7
+        },
+        {
+          "location": "end",
+          "operation": "stop",
+          "waypoint_index": null
+        }
+      ],
+      "dropoff_pose": {
+        "x": 145174.08096109758,
+        "y": -82157.74504863907,
+        "heading_deg": 0.0
+      },
+      "point_path_modes": {
+        "1": "turn",
+        "7": "turn",
+        "8": "line"
+      },
+      "dropoff_waypoint_index": 4
     }
   ],
   "vehicles": [
@@ -829,8 +1296,8 @@
       "width": 882.738,
       "steering_mode": "ackermann_rear",
       "wheelbase": 500.0,
-      "max_steering_angle_deg": 89.0,
-      "min_turning_radius": 250.152,
+      "max_steering_angle_deg": 70.0,
+      "min_turning_radius": 1000.0,
       "pose_spacing": 0.75,
       "dxf_block_name": "Forklift AMR",
       "block_forward_angle_deg": 90.0,
@@ -882,6 +1349,6 @@
       ]
     }
   ],
-  "active_level": "Level 2",
-  "active_start": "Start 3"
+  "active_level": "Level 4",
+  "active_start": "Level 4 Lift"
 }

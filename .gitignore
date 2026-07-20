@@ -4,5 +4,4 @@ __pycache__/
 *.dxf~
 *.bak
 tmp/
-tests/
 output/
