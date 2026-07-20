@@ -473,8 +473,8 @@ def _add_route_action_markers(msp, poses: list[Pose], profile: VehicleProfile) -
     entities = []
     marker_radius = max(profile.width * 0.12, profile.length * 0.05)
     for previous, current in zip(poses, poses[1:]):
-        was_reverse = previous.maneuver == "reverse"
-        is_reverse = current.maneuver == "reverse"
+        was_reverse = previous.maneuver.endswith("reverse")
+        is_reverse = current.maneuver.endswith("reverse")
         if was_reverse == is_reverse:
             continue
         x, y = previous.x, previous.y

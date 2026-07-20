@@ -13,6 +13,7 @@ class SteeringMode(str, Enum):
     ACKERMANN_FRONT = "ackermann_front"
     ACKERMANN_REAR = "ackermann_rear"
     FOUR_WHEEL = "four_wheel"
+    CRAB = "crab"
     DIFFERENTIAL = "differential"
     OMNI = "omni"
 
@@ -22,6 +23,7 @@ class SteeringMode(str, Enum):
             SteeringMode.ACKERMANN_FRONT: "Ackermann front steer",
             SteeringMode.ACKERMANN_REAR: "Rear steer",
             SteeringMode.FOUR_WHEEL: "Four-wheel steer",
+            SteeringMode.CRAB: "Crab steer (parallel wheels)",
             SteeringMode.DIFFERENTIAL: "Differential drive",
             SteeringMode.OMNI: "Omni / holonomic",
         }[self]
@@ -90,10 +92,12 @@ class VehicleProfile:
             steer_rear = self.steering_mode in {
                 SteeringMode.ACKERMANN_REAR,
                 SteeringMode.FOUR_WHEEL,
+                SteeringMode.CRAB,
             }
             steer_front = self.steering_mode in {
                 SteeringMode.ACKERMANN_FRONT,
                 SteeringMode.FOUR_WHEEL,
+                SteeringMode.CRAB,
             }
             self.wheels = [
                 WheelSpec("Front left", half_base, half_width, steerable=steer_front),
@@ -169,6 +173,9 @@ class VehicleProfile:
         if self.steering_mode == SteeringMode.FOUR_WHEEL:
             # Equal front/rear steering in opposite phase doubles yaw contribution.
             return wheelbase / (2.0 * tangent)
+        if self.steering_mode == SteeringMode.CRAB:
+            # Crab-capable 4WS uses counter-phase steering for ordinary turns.
+            return wheelbase / (2.0 * tangent)
         # Differential and omni running gear can rotate/reorient about the centre.
         return 0.0
 
@@ -181,6 +188,11 @@ class VehicleProfile:
             return "Rcentre = sqrt((wheelbase / tan(steer))^2 + fixed-axle offset^2)"
         if self.steering_mode == SteeringMode.FOUR_WHEEL:
             return f"R = wheelbase / (2 x tan({angle:.1f} deg))"
+        if self.steering_mode == SteeringMode.CRAB:
+            return (
+                f"Normal 4WS: R = wheelbase / (2 x tan({angle:.1f} deg)); "
+                "selected crab legs: R = infinite"
+            )
         if self.steering_mode == SteeringMode.DIFFERENTIAL:
             return "R = 0 (counter-rotating driven wheels permit an in-place turn)"
         return "R = 0 (holonomic motion permits in-place reorientation)"
@@ -254,9 +266,20 @@ class VehicleProfile:
     @property
     def supports_point_turn(self) -> bool:
         """Whether the configured running gear can rotate the vehicle at a stop."""
+        if self.steering_mode == SteeringMode.CRAB:
+            return False
         if self.steering_mode == SteeringMode.DIFFERENTIAL:
             return sum(1 for wheel in self.wheels if wheel.drive) >= 2
         return any(wheel.drive and wheel.steerable for wheel in self.wheels)
+
+    @property
+    def supports_crab_movement(self) -> bool:
+        """Whether the running gear can hold all wheel axes parallel."""
+        return (
+            self.steering_mode == SteeringMode.CRAB
+            and len(self.wheels) >= 2
+            and all(wheel.steerable for wheel in self.wheels)
+        )
 
 
 @dataclass
@@ -327,6 +350,28 @@ class RouteOperation:
             "operation": self.operation,
             "waypoint_index": self.waypoint_index,
         }
+
+
+def _valid_point_path_mode(value: Any) -> bool:
+    mode = str(value)
+    if mode in {"line", "straight", "turn", "minimum_radius", "crab"}:
+        return True
+    if mode.startswith("crab:"):
+        parts = mode.split(":")
+        if len(parts) != 3:
+            return False
+        try:
+            float(parts[1])
+            float(parts[2])
+            return True
+        except (TypeError, ValueError):
+            return False
+    if not mode.startswith("fillet:"):
+        return False
+    try:
+        return float(mode.split(":", 1)[1]) > 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 @dataclass
@@ -417,7 +462,7 @@ class RoutePlan:
             point_path_modes={
                 int(index): str(mode)
                 for index, mode in data.get("point_path_modes", {}).items()
-                if str(index).isdigit() and str(mode) in {"straight", "turn", "minimum_radius"}
+                if str(index).isdigit() and _valid_point_path_mode(mode)
             },
             dropoff_waypoint_index=(
                 max(0, int(data["dropoff_waypoint_index"]))
@@ -447,7 +492,7 @@ class RoutePlan:
                 operation.waypoint_index: operation.operation
                 for operation in plan.operations
                 if operation.location == "waypoint"
-                and operation.operation in {"straight", "turn", "minimum_radius"}
+                and _valid_point_path_mode(operation.operation)
                 and operation.waypoint_index is not None
             }
         return plan
@@ -510,12 +555,17 @@ class RoutePlan:
             if self.dropoff_pose is not None and index == dropoff_index:
                 operations.append(RouteOperation("dropoff", "dropoff"))
                 operations.append(RouteOperation("dropoff", "reverse"))
+            path_mode = self.point_path_modes.get(index, "turn")
             operation = (
                 "point_turn"
                 if index in point_turns
                 else "reverse"
                 if index in reverses
-                else self.point_path_modes.get(index, "turn")
+                else "crab"
+                if path_mode.startswith("crab:")
+                else "minimum_radius"
+                if path_mode.startswith("fillet:")
+                else path_mode
             )
             operations.append(RouteOperation("waypoint", operation, index))
         if self.dropoff_pose is not None and dropoff_index == len(self.waypoints):
@@ -538,6 +588,13 @@ def step_pose(
         min(profile.max_steering_angle_deg, steering_deg),
     )
     heading = radians(pose.heading_deg)
+    if profile.steering_mode == SteeringMode.CRAB:
+        # In crab mode every wheel is parallel. Speed is resolved along the common
+        # wheel axis while the chassis heading remains fixed.
+        travel_heading = heading + radians(steering)
+        dx = distance * cos(travel_heading) - lateral_distance * sin(heading)
+        dy = distance * sin(travel_heading) + lateral_distance * cos(heading)
+        return Pose(pose.x + dx, pose.y + dy, pose.heading_deg, steering, "crab")
     if profile.steering_mode == SteeringMode.OMNI:
         dx = distance * cos(heading) - lateral_distance * sin(heading)
         dy = distance * sin(heading) + lateral_distance * cos(heading)
