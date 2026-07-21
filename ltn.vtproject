@@ -181,7 +181,11 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        2,
+        3,
+        4
+      ]
     },
     {
       "name": "Path 2",
@@ -290,7 +294,11 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        2,
+        3,
+        4
+      ]
     },
     {
       "name": "Path 3",
@@ -399,7 +407,11 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        2,
+        3,
+        4
+      ]
     },
     {
       "name": "Path 4",
@@ -517,7 +529,11 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        2,
+        3,
+        5
+      ]
     },
     {
       "name": "Path 5",
@@ -622,7 +638,11 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        2,
+        3,
+        4
+      ]
     },
     {
       "name": "Lift Lobby 1",
@@ -834,7 +854,10 @@
       "dropoff_waypoint_index": 6,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        0,
+        7
+      ]
     },
     {
       "name": "Path 6",
@@ -936,7 +959,9 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        0
+      ]
     },
     {
       "name": "Best case",
@@ -1032,7 +1057,9 @@
       "dropoff_waypoint_index": 2,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        2
+      ]
     },
     {
       "name": "Path 7",
@@ -1188,7 +1215,10 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        0,
+        5
+      ]
     },
     {
       "name": "Path 8",
@@ -1325,114 +1355,13 @@
       "dropoff_waypoint_index": 4,
       "payload_location_name": "",
       "finish_position_name": "",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        0,
+        5
+      ]
     },
     {
       "name": "Payload 1 Path",
-      "end_pose": {
-        "x": 138497.43689461984,
-        "y": -138760.07425914818,
-        "heading_deg": 0.0
-      },
-      "waypoints": [],
-      "point_turn_indices": [],
-      "reversing_action_indices": [],
-      "level_name": "Level 5",
-      "start_position_name": "Level 5",
-      "start_pose": {
-        "x": 138086.52283223526,
-        "y": -135271.0012646171,
-        "heading_deg": 0.0
-      },
-      "tangent_handles": {},
-      "payload_action": "stop",
-      "operations": [
-        {
-          "location": "start",
-          "operation": "travel",
-          "waypoint_index": null
-        },
-        {
-          "location": "dropoff",
-          "operation": "dropoff",
-          "waypoint_index": null
-        },
-        {
-          "location": "dropoff",
-          "operation": "reverse",
-          "waypoint_index": null
-        },
-        {
-          "location": "end",
-          "operation": "stop",
-          "waypoint_index": null
-        }
-      ],
-      "dropoff_pose": {
-        "x": 144812.5640784687,
-        "y": -142571.46691133437,
-        "heading_deg": -90.0
-      },
-      "point_path_modes": {},
-      "dropoff_waypoint_index": 0,
-      "payload_location_name": "Payload 1",
-      "finish_position_name": "Level 5 Finish",
-      "continue_reversing": true
-    },
-    {
-      "name": "Payload 2 Path",
-      "end_pose": {
-        "x": 138497.43689461984,
-        "y": -138760.07425914818,
-        "heading_deg": 0.0
-      },
-      "waypoints": [],
-      "point_turn_indices": [],
-      "reversing_action_indices": [],
-      "level_name": "Level 5",
-      "start_position_name": "Level 5",
-      "start_pose": {
-        "x": 138086.52283223526,
-        "y": -135271.0012646171,
-        "heading_deg": 0.0
-      },
-      "tangent_handles": {},
-      "payload_action": "none",
-      "operations": [
-        {
-          "location": "start",
-          "operation": "travel",
-          "waypoint_index": null
-        },
-        {
-          "location": "dropoff",
-          "operation": "dropoff",
-          "waypoint_index": null
-        },
-        {
-          "location": "dropoff",
-          "operation": "reverse",
-          "waypoint_index": null
-        },
-        {
-          "location": "end",
-          "operation": "stop",
-          "waypoint_index": null
-        }
-      ],
-      "dropoff_pose": {
-        "x": 146262.5640784687,
-        "y": -142571.46691133437,
-        "heading_deg": -90.0
-      },
-      "point_path_modes": {},
-      "dropoff_waypoint_index": 0,
-      "payload_location_name": "Payload 2",
-      "finish_position_name": "Level 5 Finish",
-      "continue_reversing": true
-    },
-    {
-      "name": "Payload 3 Path",
       "end_pose": {
         "x": 138497.43689461984,
         "y": -138760.07425914818,
@@ -1444,12 +1373,16 @@
           -135270.6430039715
         ],
         [
-          141099.4256931958,
-          -141292.1128281447
+          141165.800372006,
+          -140938.11454115715
         ],
         [
-          147735.78155885928,
-          -141292.1128281447
+          144757.8913403102,
+          -140938.11454115715
+        ],
+        [
+          144854.5167756982,
+          -140793.755973469
         ],
         [
           147754.5167756982,
@@ -1475,7 +1408,7 @@
       ],
       "reversing_action_indices": [
         3,
-        6
+        7
       ],
       "level_name": "Level 5",
       "start_position_name": "Level 5",
@@ -1485,7 +1418,7 @@
         "heading_deg": 0.0
       },
       "tangent_handles": {},
-      "payload_action": "stop",
+      "payload_action": "none",
       "operations": [
         {
           "location": "start",
@@ -1534,8 +1467,13 @@
         },
         {
           "location": "waypoint",
-          "operation": "reverse_then_turn",
+          "operation": "turn",
           "waypoint_index": 6
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 7
         },
         {
           "location": "end",
@@ -1544,29 +1482,73 @@
         }
       ],
       "dropoff_pose": {
-        "x": 147712.5640784687,
-        "y": -142571.46691133437,
+        "x": 144757.8913403102,
+        "y": -142588.2094063529,
         "heading_deg": -90.0
       },
       "point_path_modes": {
         "3": "reverse_then_turn",
-        "6": "reverse_then_turn"
+        "7": "reverse_then_turn"
       },
       "dropoff_waypoint_index": 3,
-      "payload_location_name": "Payload 3",
+      "payload_location_name": "Payload 1",
       "finish_position_name": "Level 5 Finish",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        3,
+        7
+      ]
     },
     {
-      "name": "Payload 4 Path",
+      "name": "Payload 2 Path",
       "end_pose": {
-        "x": 138497.43689461984,
-        "y": -138760.07425914818,
+        "x": 138243.00062584758,
+        "y": -138760.07425914815,
         "heading_deg": 0.0
       },
-      "waypoints": [],
-      "point_turn_indices": [],
-      "reversing_action_indices": [],
+      "waypoints": [
+        [
+          141159.95664953205,
+          -135270.6430039715
+        ],
+        [
+          141165.800372006,
+          -140938.11454115715
+        ],
+        [
+          146161.6488763869,
+          -140927.11455911805
+        ],
+        [
+          146161.6488763869,
+          -140782.7559914299
+        ],
+        [
+          147771.4791936163,
+          -140782.75599142993
+        ],
+        [
+          144441.49375557053,
+          -140834.43206817374
+        ],
+        [
+          142359.0937025234,
+          -141139.92396119234
+        ],
+        [
+          141590.9737575431,
+          -138754.07446827795
+        ]
+      ],
+      "point_turn_indices": [
+        0,
+        1,
+        2,
+        4
+      ],
+      "reversing_action_indices": [
+        3,
+        7
+      ],
       "level_name": "Level 5",
       "start_position_name": "Level 5",
       "start_pose": {
@@ -1583,6 +1565,21 @@
           "waypoint_index": null
         },
         {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 2
+        },
+        {
           "location": "dropoff",
           "operation": "dropoff",
           "waypoint_index": null
@@ -1593,21 +1590,326 @@
           "waypoint_index": null
         },
         {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 3
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 4
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 5
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 6
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 7
+        },
+        {
           "location": "end",
           "operation": "stop",
           "waypoint_index": null
         }
       ],
       "dropoff_pose": {
-        "x": 149162.5640784687,
-        "y": -142571.46691133437,
+        "x": 146167.68994003054,
+        "y": -142588.2094063529,
         "heading_deg": -90.0
       },
-      "point_path_modes": {},
-      "dropoff_waypoint_index": 0,
+      "point_path_modes": {
+        "3": "reverse_then_turn",
+        "7": "reverse_then_turn"
+      },
+      "dropoff_waypoint_index": 3,
+      "payload_location_name": "Payload 2",
+      "finish_position_name": "Level 5 Finish",
+      "continue_reversing_indices": [
+        3,
+        7
+      ]
+    },
+    {
+      "name": "Payload 3 Path",
+      "end_pose": {
+        "x": 138497.43689461984,
+        "y": -138760.07425914818,
+        "heading_deg": 0.0
+      },
+      "waypoints": [
+        [
+          141159.95664953205,
+          -135270.6430039715
+        ],
+        [
+          141165.800372006,
+          -140938.11454115715
+        ],
+        [
+          147617.68994003054,
+          -140938.11454115715
+        ],
+        [
+          147604.0596589506,
+          -140785.27476450987
+        ],
+        [
+          146558.66631246853,
+          -140887.04927201892
+        ],
+        [
+          144797.70453185175,
+          -140859.875695051
+        ],
+        [
+          142715.30447880455,
+          -140851.56285658374
+        ],
+        [
+          141683.11948542774,
+          -138729.65125636358
+        ]
+      ],
+      "point_turn_indices": [
+        0,
+        1,
+        2
+      ],
+      "reversing_action_indices": [
+        3,
+        7
+      ],
+      "level_name": "Level 5",
+      "start_position_name": "Level 5",
+      "start_pose": {
+        "x": 138159.34889541758,
+        "y": -135273.6798560996,
+        "heading_deg": 0.0
+      },
+      "tangent_handles": {},
+      "payload_action": "none",
+      "operations": [
+        {
+          "location": "start",
+          "operation": "travel",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 2
+        },
+        {
+          "location": "dropoff",
+          "operation": "dropoff",
+          "waypoint_index": null
+        },
+        {
+          "location": "dropoff",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 3
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 4
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 5
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 6
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 7
+        },
+        {
+          "location": "end",
+          "operation": "stop",
+          "waypoint_index": null
+        }
+      ],
+      "dropoff_pose": {
+        "x": 147617.68994003054,
+        "y": -142588.2094063529,
+        "heading_deg": -90.0
+      },
+      "point_path_modes": {
+        "3": "reverse_then_turn",
+        "7": "reverse_then_turn"
+      },
+      "dropoff_waypoint_index": 3,
+      "payload_location_name": "Payload 3",
+      "finish_position_name": "Level 5 Finish",
+      "continue_reversing_indices": [
+        3,
+        7
+      ]
+    },
+    {
+      "name": "Payload 4 Path",
+      "end_pose": {
+        "x": 138497.43689461984,
+        "y": -138760.07425914818,
+        "heading_deg": 0.0
+      },
+      "waypoints": [
+        [
+          141159.95664953205,
+          -135270.6430039715
+        ],
+        [
+          141165.800372006,
+          -140938.11454115715
+        ],
+        [
+          146077.25338479274,
+          -140922.10283449257
+        ],
+        [
+          149056.53687490805,
+          -140922.10283449257
+        ],
+        [
+          149069.6570004213,
+          -141065.50966777274
+        ],
+        [
+          142756.87440261955,
+          -140796.53207284704
+        ],
+        [
+          141633.73681912484,
+          -138734.4222093665
+        ]
+      ],
+      "point_turn_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "reversing_action_indices": [
+        4,
+        6
+      ],
+      "level_name": "Level 5",
+      "start_position_name": "Level 5",
+      "start_pose": {
+        "x": 138086.52283223526,
+        "y": -135271.0012646171,
+        "heading_deg": 0.0
+      },
+      "tangent_handles": {
+        "5": [
+          -2759.3818719798874,
+          1287.3408103733673
+        ]
+      },
+      "payload_action": "stop",
+      "operations": [
+        {
+          "location": "start",
+          "operation": "travel",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 0
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 1
+        },
+        {
+          "location": "waypoint",
+          "operation": "crab_turn_x",
+          "waypoint_index": 2
+        },
+        {
+          "location": "waypoint",
+          "operation": "point_turn",
+          "waypoint_index": 3
+        },
+        {
+          "location": "dropoff",
+          "operation": "dropoff",
+          "waypoint_index": null
+        },
+        {
+          "location": "dropoff",
+          "operation": "reverse",
+          "waypoint_index": null
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 4
+        },
+        {
+          "location": "waypoint",
+          "operation": "turn",
+          "waypoint_index": 5
+        },
+        {
+          "location": "waypoint",
+          "operation": "reverse_then_turn",
+          "waypoint_index": 6
+        },
+        {
+          "location": "end",
+          "operation": "stop",
+          "waypoint_index": null
+        }
+      ],
+      "dropoff_pose": {
+        "x": 149067.68994003054,
+        "y": -142588.2094063529,
+        "heading_deg": -90.0
+      },
+      "point_path_modes": {
+        "3": "crab:-90:-90:x",
+        "4": "reverse_then_turn",
+        "6": "reverse_then_turn",
+        "7": "straight"
+      },
+      "dropoff_waypoint_index": 4,
       "payload_location_name": "Payload 4",
       "finish_position_name": "Level 5 Finish",
-      "continue_reversing": true
+      "continue_reversing_indices": [
+        4
+      ]
     }
   ],
   "vehicles": [
@@ -1615,7 +1917,7 @@
       "name": "Forklift",
       "length": 2398.767,
       "width": 882.738,
-      "steering_mode": "omni",
+      "steering_mode": "crab",
       "wheelbase": 500.0,
       "max_steering_angle_deg": 90.0,
       "min_turning_radius": 0.0,
@@ -1637,7 +1939,7 @@
           "y": 250.0,
           "radius": 200.0,
           "width": 0.12,
-          "steerable": false,
+          "steerable": true,
           "drive": true
         },
         {
@@ -1646,7 +1948,7 @@
           "y": -250.0,
           "radius": 200.0,
           "width": 0.12,
-          "steerable": false,
+          "steerable": true,
           "drive": true
         },
         {
@@ -1677,8 +1979,8 @@
       "name": "Payload 1",
       "level_name": "Level 5",
       "pose": {
-        "x": 144812.5640784687,
-        "y": -143721.46691133437,
+        "x": 144717.68994003054,
+        "y": -143738.2094063529,
         "heading_deg": 0.0
       },
       "group_name": "Level 5:Payload:1"
@@ -1687,8 +1989,8 @@
       "name": "Payload 2",
       "level_name": "Level 5",
       "pose": {
-        "x": 146262.5640784687,
-        "y": -143721.46691133437,
+        "x": 146167.68994003054,
+        "y": -143738.2094063529,
         "heading_deg": 0.0
       },
       "group_name": "Level 5:Payload:1"
@@ -1697,8 +1999,8 @@
       "name": "Payload 3",
       "level_name": "Level 5",
       "pose": {
-        "x": 147712.5640784687,
-        "y": -143721.46691133437,
+        "x": 147617.68994003054,
+        "y": -143738.2094063529,
         "heading_deg": 0.0
       },
       "group_name": "Level 5:Payload:1"
@@ -1707,8 +2009,8 @@
       "name": "Payload 4",
       "level_name": "Level 5",
       "pose": {
-        "x": 149162.5640784687,
-        "y": -143721.46691133437,
+        "x": 149067.68994003054,
+        "y": -143738.2094063529,
         "heading_deg": 0.0
       },
       "group_name": "Level 5:Payload:1"
@@ -1997,12 +2299,12 @@
       "level_name": "Level 5",
       "kind": "door",
       "x": 143881.50286745105,
-      "y": -142315.93020993992,
-      "width": 1800.0,
+      "y": -142218.2991925298,
+      "width": 2400.0,
       "height": 100.0,
       "open": true,
       "end_x": 143881.50286745105,
-      "end_y": -140515.93020993992,
+      "end_y": -139818.2991925298,
       "chain_name": "Wall Chain 1",
       "host_wall_name": "Wall Chain 1 / Segment 3"
     }

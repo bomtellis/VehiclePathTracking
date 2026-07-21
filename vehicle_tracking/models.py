@@ -267,7 +267,10 @@ class VehicleProfile:
     def supports_point_turn(self) -> bool:
         """Whether the configured running gear can rotate the vehicle at a stop."""
         if self.steering_mode == SteeringMode.CRAB:
-            return False
+            return (
+                len(self.wheels) >= 2
+                and all(wheel.drive and wheel.steerable for wheel in self.wheels)
+            )
         if self.steering_mode == SteeringMode.DIFFERENTIAL:
             return sum(1 for wheel in self.wheels if wheel.drive) >= 2
         return any(wheel.drive and wheel.steerable for wheel in self.wheels)
@@ -486,12 +489,12 @@ def _valid_point_path_mode(value: Any) -> bool:
         return True
     if mode.startswith("crab:"):
         parts = mode.split(":")
-        if len(parts) != 3:
+        if len(parts) not in {3, 4}:
             return False
         try:
             float(parts[1])
             float(parts[2])
-            return True
+            return len(parts) == 3 or parts[3].casefold() in {"x", "y"}
         except (TypeError, ValueError):
             return False
     if not mode.startswith("fillet:"):

@@ -66,7 +66,6 @@ from .dxf_io import (
     load_dxf,
     load_dxf_process_safe,
     payload_outline_points,
-    vehicle_corners,
 )
 from .models import (
     Pose,
@@ -4853,12 +4852,21 @@ class VehicleTrackerWindow(QMainWindow):
         if mode is None or not mode.startswith("crab:"):
             return None
         parts = mode.split(":")
-        if len(parts) != 3:
+        if len(parts) not in {3, 4}:
             return None
         try:
             return float(parts[1]), float(parts[2])
         except ValueError:
             return None
+
+    @staticmethod
+    def _crab_axis_from_mode(mode: str | None) -> str | None:
+        if mode is None or not mode.startswith("crab:"):
+            return None
+        parts = mode.split(":")
+        if len(parts) != 4 or parts[3].casefold() not in {"x", "y"}:
+            return None
+        return parts[3].casefold()
 
     def _prompt_crab_headings(
         self, segment: int, existing_mode: str | None = None
@@ -4916,6 +4924,89 @@ class VehicleTrackerWindow(QMainWindow):
         if not accepted:
             return None
         return f"crab:{start_heading:.12g}:{end_heading:.12g}"
+
+    def _prompt_locked_crab_heading(
+        self, existing_mode: str | None = None
+    ) -> float | None:
+        existing = self._crab_headings_from_mode(existing_mode)
+        default_heading = (
+            existing[0]
+            if existing is not None
+            else self.end_pose.heading_deg
+            if self.end_pose is not None
+            else self.start_pose.heading_deg
+        )
+        heading, accepted = QInputDialog.getDouble(
+            self,
+            "Crab turn heading",
+            "Chassis heading after the point turn and during translation (deg):",
+            default_heading,
+            -360.0,
+            360.0,
+            3,
+        )
+        return heading if accepted else None
+
+    def _set_route_crab_turn_axis(
+        self, waypoint_index: int, axis: str, heading_deg: float
+    ) -> bool:
+        axis = axis.casefold()
+        profile = self.form_profile()
+        if axis not in {"x", "y"} or not 0 <= waypoint_index < len(self.route_waypoints):
+            return False
+        if not profile.supports_crab_movement or not profile.supports_point_turn:
+            QMessageBox.warning(
+                self,
+                "Crab turn unavailable",
+                "This action requires a crab-capable vehicle whose wheels are all driven and steerable.",
+            )
+            return False
+        current = self.route_waypoints[waypoint_index]
+        next_is_waypoint = waypoint_index + 1 < len(self.route_waypoints)
+        if next_is_waypoint:
+            original_target = self.route_waypoints[waypoint_index + 1]
+        elif self.end_pose is not None:
+            original_target = (self.end_pose.x, self.end_pose.y)
+        else:
+            return False
+        target = (
+            (original_target[0], current[1])
+            if axis == "x"
+            else (current[0], original_target[1])
+        )
+        if hypot(target[0] - current[0], target[1] - current[1]) < 1e-9:
+            QMessageBox.warning(
+                self,
+                "Crab translation has no length",
+                f"The next point has no DXF {axis.upper()} displacement from this turn point.",
+            )
+            return False
+
+        outgoing_segment = waypoint_index + 1
+        if next_is_waypoint:
+            self.route_waypoints[waypoint_index + 1] = target
+        elif hypot(
+            target[0] - original_target[0], target[1] - original_target[1]
+        ) > 1e-9:
+            old_final_segment = len(self.route_waypoints)
+            old_final_mode = self.route_point_path_modes.pop(old_final_segment, None)
+            self.route_waypoints.append(target)
+            if old_final_mode is not None:
+                self.route_point_path_modes[len(self.route_waypoints)] = old_final_mode
+
+        self.route_point_turns.add(waypoint_index)
+        self.route_reversing_actions.discard(waypoint_index)
+        self.route_continue_reversing.discard(waypoint_index)
+        self.route_tangent_handles.pop(waypoint_index, None)
+        self.route_tangent_handles.pop(waypoint_index + 1, None)
+        self.route_point_path_modes[outgoing_segment] = (
+            f"crab:{heading_deg:.12g}:{heading_deg:.12g}:{axis}"
+        )
+        self.statusBar().showMessage(
+            f"Route point {waypoint_index + 1} will point-turn to {heading_deg:.1f} deg, "
+            f"lock that heading, then crab along DXF {axis.upper()} to the next point."
+        )
+        return True
 
     @staticmethod
     def _fillet_connected_straights(
@@ -5365,6 +5456,8 @@ class VehicleTrackerWindow(QMainWindow):
         obstacles: list[Obstacle],
         clearance: float,
         grid_hint: float,
+        orthogonal: bool = False,
+        vertical_first: bool = False,
     ) -> list[tuple[float, float]] | None:
         expanded = []
         expanded_segments = []
@@ -5487,9 +5580,13 @@ class VehicleTrackerWindow(QMainWindow):
         came_from: dict[tuple[int, int], tuple[int, int]] = {}
         costs = {start_node: 0.0}
         neighbours = (
-            (-1, -1), (0, -1), (1, -1),
-            (-1, 0),            (1, 0),
-            (-1, 1),  (0, 1),  (1, 1),
+            ((0, -1), (-1, 0), (1, 0), (0, 1))
+            if orthogonal
+            else (
+                (-1, -1), (0, -1), (1, -1),
+                (-1, 0),            (1, 0),
+                (-1, 1),  (0, 1),  (1, 1),
+            )
         )
         while frontier:
             _priority, current_cost, current = heappop(frontier)
@@ -5540,9 +5637,44 @@ class VehicleTrackerWindow(QMainWindow):
         index = 0
         while index < len(points) - 1:
             next_index = len(points) - 1
-            while next_index > index + 1 and not clear_segment(points[index], points[next_index]):
-                next_index -= 1
-            simplified.append(points[next_index])
+            elbow: tuple[float, float] | None = None
+            if orthogonal:
+                while next_index > index:
+                    first = points[index]
+                    second = points[next_index]
+                    horizontal_then_vertical = (second[0], first[1])
+                    vertical_then_horizontal = (first[0], second[1])
+                    candidates = (
+                        (vertical_then_horizontal, horizontal_then_vertical)
+                        if vertical_first
+                        else (horizontal_then_vertical, vertical_then_horizontal)
+                    )
+                    elbow = next(
+                        (
+                            candidate
+                            for candidate in candidates
+                            if clear_segment(first, candidate)
+                            and clear_segment(candidate, second)
+                        ),
+                        None,
+                    )
+                    if elbow is not None:
+                        break
+                    next_index -= 1
+            else:
+                while next_index > index + 1 and not clear_segment(
+                    points[index], points[next_index]
+                ):
+                    next_index -= 1
+            if elbow is not None and hypot(
+                elbow[0] - simplified[-1][0], elbow[1] - simplified[-1][1]
+            ) > 1e-9:
+                simplified.append(elbow)
+            if hypot(
+                points[next_index][0] - simplified[-1][0],
+                points[next_index][1] - simplified[-1][1],
+            ) > 1e-9:
+                simplified.append(points[next_index])
             index = next_index
         return simplified
 
@@ -5590,6 +5722,9 @@ class VehicleTrackerWindow(QMainWindow):
             if turn_angle >= 165.0:
                 reverses.add(local_index)
                 modes[local_index] = "reverse_then_turn" if profile.supports_point_turn else "turn"
+            elif profile.supports_point_turn and minimum_radius <= 1e-9:
+                point_turns.add(local_index)
+                modes[local_index] = "turn"
             elif radius_is_tight and profile.supports_point_turn:
                 if turn_angle >= 120.0:
                     reverses.add(local_index)
@@ -5655,6 +5790,389 @@ class VehicleTrackerWindow(QMainWindow):
             return f"crab:{vehicle_heading_deg:.6f}:{vehicle_heading_deg:.6f}"
         return None
 
+    def _auto_route_candidate_poses(
+        self, route: RoutePlan
+    ) -> list[Pose]:
+        return self._planned_route_poses_for(
+            route.end_pose,
+            route.waypoints,
+            set(route.point_turn_indices),
+            set(route.reversing_action_indices),
+            self._start_pose_for_route(route),
+            route.tangent_handles,
+            route.dropoff_pose,
+            route.point_path_modes,
+            route.dropoff_waypoint_index,
+            self._route_starts_reversing(route),
+            set(route.continue_reversing_indices),
+        )
+
+    def _auto_route_candidate_is_feasible(
+        self, route: RoutePlan, profile: VehicleProfile
+    ) -> bool:
+        return not self._auto_route_candidate_issues(route, profile)
+
+    def _auto_route_candidate_issues(
+        self, route: RoutePlan, profile: VehicleProfile
+    ) -> list[str]:
+        poses = self._auto_route_candidate_poses(route)
+        if len(poses) < 2:
+            return ["complete route geometry"]
+        steering_invalid, _curvatures, _unsupported = self._route_section_analysis(
+            poses, profile
+        )
+        obstacle_invalid = self._route_obstacle_collision_flags(poses, profile)
+        issues = []
+        if any(steering_invalid):
+            issues.append("steering limits")
+        if any(obstacle_invalid):
+            issues.append("the exact vehicle/payload clearance check")
+        dropoff = self._payload_dropoff_analysis(route, profile, poses)
+        if dropoff is not None and not dropoff.possible:
+            issues.append("drop-off alignment")
+        return issues
+
+    def _auto_route_locked_crab_finish_candidate(
+        self,
+        route: RoutePlan,
+        profile: VehicleProfile,
+        *,
+        allow_infeasible: bool = False,
+    ) -> tuple[RoutePlan, list[str]] | None:
+        """Create point-turn, fixed-heading crab, then forward finish geometry."""
+        if (
+            not profile.supports_crab_movement
+            or not profile.supports_point_turn
+            or profile.max_steering_angle_deg < 89.5
+        ):
+            return None
+
+        heading = radians(route.end_pose.heading_deg)
+        forward = (cos(heading), sin(heading))
+        left = (-forward[1], forward[0])
+        minimum_prefix = (
+            min(route.dropoff_waypoint_index, len(route.waypoints))
+            if route.dropoff_pose is not None
+            and route.dropoff_waypoint_index is not None
+            else 0
+        )
+        best: tuple[tuple[int, float], RoutePlan, list[str]] | None = None
+        approach_unit = max(profile.length, profile.width * 1.5, 0.1)
+
+        recent_cut_limit = max(minimum_prefix, len(route.waypoints) - 3)
+        cut_values = list(
+            range(len(route.waypoints), recent_cut_limit - 1, -1)
+        )
+        if minimum_prefix not in cut_values:
+            cut_values.append(minimum_prefix)
+        for cut in cut_values:
+            prefix = list(route.waypoints[:cut])
+            anchor = (
+                prefix[-1]
+                if prefix
+                else (route.dropoff_pose.x, route.dropoff_pose.y)
+                if route.dropoff_pose is not None and minimum_prefix == 0
+                else (self._start_pose_for_route(route).x, self._start_pose_for_route(route).y)
+            )
+            for approach_factor in (0.75, 1.0, 1.5, 2.0):
+                approach_distance = approach_unit * approach_factor
+                forward_entry = (
+                    route.end_pose.x - forward[0] * approach_distance,
+                    route.end_pose.y - forward[1] * approach_distance,
+                )
+                lateral_offset = (
+                    (anchor[0] - forward_entry[0]) * left[0]
+                    + (anchor[1] - forward_entry[1]) * left[1]
+                )
+                if abs(lateral_offset) < max(profile.width * 0.1, 0.01):
+                    continue
+                turn_point = (
+                    forward_entry[0] + left[0] * lateral_offset,
+                    forward_entry[1] + left[1] * lateral_offset,
+                )
+                if (
+                    hypot(turn_point[0] - anchor[0], turn_point[1] - anchor[1])
+                    < 1e-6
+                ):
+                    continue
+
+                turn_index = len(prefix)
+                waypoints = [*prefix, turn_point, forward_entry]
+                point_turns = {
+                    index for index in route.point_turn_indices if index < cut
+                }
+                point_turns.add(turn_index)
+                reverses = {
+                    index for index in route.reversing_action_indices if index < cut
+                }
+                continue_reversing = {
+                    index for index in route.continue_reversing_indices if index < cut
+                }
+                modes = {
+                    index: mode
+                    for index, mode in route.point_path_modes.items()
+                    if index < cut
+                }
+                locked_heading = route.end_pose.heading_deg
+                modes[turn_index + 1] = (
+                    f"crab:{locked_heading:.6f}:{locked_heading:.6f}"
+                )
+                modes[turn_index + 2] = "straight"
+                candidate = RoutePlan(
+                    name=route.name,
+                    end_pose=Pose(
+                        route.end_pose.x,
+                        route.end_pose.y,
+                        route.end_pose.heading_deg,
+                    ),
+                    waypoints=waypoints,
+                    point_turn_indices=sorted(point_turns),
+                    reversing_action_indices=sorted(reverses),
+                    level_name=route.level_name,
+                    start_position_name=route.start_position_name,
+                    start_pose=route.start_pose,
+                    tangent_handles={
+                        index: vector
+                        for index, vector in route.tangent_handles.items()
+                        if index < cut
+                    },
+                    payload_action=route.payload_action,
+                    operations=[
+                        operation
+                        for operation in route.operations
+                        if operation.location == "start"
+                    ],
+                    dropoff_pose=route.dropoff_pose,
+                    point_path_modes=modes,
+                    dropoff_waypoint_index=route.dropoff_waypoint_index,
+                    payload_location_name=route.payload_location_name,
+                    finish_position_name=route.finish_position_name,
+                    continue_reversing_indices=sorted(continue_reversing),
+                )
+                issues = self._auto_route_candidate_issues(candidate, profile)
+                route_nodes = [
+                    (self._start_pose_for_route(candidate).x, self._start_pose_for_route(candidate).y),
+                    *candidate.waypoints,
+                    (candidate.end_pose.x, candidate.end_pose.y),
+                ]
+                distance = sum(
+                    hypot(second[0] - first[0], second[1] - first[1])
+                    for first, second in zip(route_nodes, route_nodes[1:])
+                )
+                if not issues:
+                    return candidate, []
+                score = (len(issues), distance)
+                if allow_infeasible and (best is None or score < best[0]):
+                    best = score, candidate, issues
+        if best is None:
+            return None
+        _score, candidate, issues = best
+        return candidate, issues
+
+    def _auto_route_example_candidate(
+        self, profile: VehicleProfile, allow_infeasible: bool = False
+    ) -> tuple[RoutePlan, str] | None:
+        if self.end_pose is None:
+            return None
+
+        def same_pose(first: Pose | None, second: Pose | None) -> bool:
+            if first is None or second is None:
+                return first is second
+            return (
+                hypot(first.x - second.x, first.y - second.y) <= 1e-6
+                and abs(
+                    ((first.heading_deg - second.heading_deg + 180.0) % 360.0)
+                    - 180.0
+                )
+                <= 1e-6
+            )
+
+        def candidate_from(
+            template: RoutePlan,
+            waypoints: list[tuple[float, float]],
+            point_turns: list[int],
+            reverses: list[int],
+            modes: dict[int, str],
+            dropoff_index: int | None,
+            continue_reversing: list[int],
+            tangent_handles: dict[int, tuple[float, float]] | None = None,
+        ) -> RoutePlan:
+            return RoutePlan(
+                name=self.route_name_edit.text().strip() or "Automatic Path",
+                end_pose=Pose(
+                    self.end_pose.x, self.end_pose.y, self.end_pose.heading_deg
+                ),
+                waypoints=waypoints,
+                point_turn_indices=point_turns,
+                reversing_action_indices=reverses,
+                level_name=self.current_level_name,
+                start_position_name=self.current_start_name,
+                start_pose=Pose(
+                    self.start_pose.x,
+                    self.start_pose.y,
+                    self.start_pose.heading_deg,
+                ),
+                tangent_handles=tangent_handles or {},
+                operations=list(template.operations),
+                dropoff_pose=(
+                    Pose(
+                        self.dropoff_pose.x,
+                        self.dropoff_pose.y,
+                        self.dropoff_pose.heading_deg,
+                    )
+                    if self.dropoff_pose is not None
+                    else None
+                ),
+                point_path_modes=modes,
+                dropoff_waypoint_index=dropoff_index,
+                continue_reversing_indices=continue_reversing,
+            )
+
+        fallback_candidates: list[tuple[int, int, RoutePlan, str]] = []
+
+        def consider(candidate: RoutePlan, source: str) -> tuple[RoutePlan, str] | None:
+            issues = self._auto_route_candidate_issues(candidate, profile)
+            if not issues:
+                return candidate, source
+            if allow_infeasible:
+                fallback_candidates.append(
+                    (len(issues), len(candidate.waypoints), candidate, source)
+                )
+            return None
+
+        templates = [
+            route
+            for route in self.saved_routes
+            if route.level_name == self.current_level_name
+            and route.start_position_name == self.current_start_name
+            and route.waypoints
+            and same_pose(route.end_pose, self.end_pose)
+            and (route.dropoff_pose is None) == (self.dropoff_pose is None)
+        ]
+        for template in templates:
+            if same_pose(template.dropoff_pose, self.dropoff_pose):
+                candidate = candidate_from(
+                    template,
+                    list(template.waypoints),
+                    list(template.point_turn_indices),
+                    list(template.reversing_action_indices),
+                    dict(template.point_path_modes),
+                    template.dropoff_waypoint_index,
+                    list(template.continue_reversing_indices),
+                    dict(template.tangent_handles),
+                )
+                accepted = consider(candidate, template.name)
+                if accepted is not None:
+                    return accepted
+
+            if (
+                template.dropoff_pose is None
+                or self.dropoff_pose is None
+                or template.dropoff_waypoint_index is None
+            ):
+                continue
+            dropoff_index = min(
+                max(template.dropoff_waypoint_index, 0), len(template.waypoints)
+            )
+            before = template.waypoints[:dropoff_index]
+            after = template.waypoints[dropoff_index:]
+            if not before or not after:
+                continue
+            delta_x = self.dropoff_pose.x - template.dropoff_pose.x
+            delta_y = self.dropoff_pose.y - template.dropoff_pose.y
+            translated_approach = (
+                before[-1][0] + delta_x,
+                before[-1][1] + delta_y,
+            )
+            translated_egress = (
+                after[0][0] + delta_x,
+                after[0][1] + delta_y,
+            )
+            waypoints = [
+                *before[:-1],
+                translated_approach,
+                translated_egress,
+                *after,
+            ]
+
+            def remap(index: int) -> int:
+                if index <= dropoff_index:
+                    return index
+                return index + 1
+
+            point_turns = sorted({remap(index) for index in template.point_turn_indices})
+            reverses = sorted({remap(index) for index in template.reversing_action_indices})
+            modes = {
+                remap(index): mode for index, mode in template.point_path_modes.items()
+            }
+            continue_reversing = sorted(
+                {remap(index) for index in template.continue_reversing_indices}
+            )
+            candidate = candidate_from(
+                template,
+                waypoints,
+                point_turns,
+                reverses,
+                modes,
+                dropoff_index,
+                continue_reversing,
+            )
+            accepted = consider(candidate, template.name)
+            if accepted is not None:
+                return accepted
+        if fallback_candidates:
+            _issue_count, _waypoint_count, candidate, source = min(
+                fallback_candidates, key=lambda item: item[:2]
+            )
+            return candidate, source
+        return None
+
+    def _apply_auto_route_candidate(
+        self,
+        candidate: RoutePlan,
+        profile: VehicleProfile,
+        source: str,
+        issues: list[str] | None = None,
+    ) -> None:
+        self.stop_route_animation()
+        self.route_waypoints = list(candidate.waypoints)
+        self.route_dropoff_waypoint_index = candidate.dropoff_waypoint_index
+        self.route_point_turns = set(candidate.point_turn_indices)
+        self.route_reversing_actions = set(candidate.reversing_action_indices)
+        self.route_continue_reversing = set(candidate.continue_reversing_indices)
+        self.route_tangent_handles = dict(candidate.tangent_handles)
+        self.route_point_path_modes = dict(candidate.point_path_modes)
+        self.route_start_operation = next(
+            (
+                operation.operation
+                for operation in candidate.ordered_operations()
+                if operation.location == "start"
+            ),
+            "travel",
+        )
+        self._selected_route_point_index = None
+        self.redraw_dynamic_layers(profile)
+        self.redraw_route_handles()
+        self._refresh_route_operations_table()
+        self._update_navigation_bounds()
+        if issues:
+            issue_text = ", ".join(dict.fromkeys(issues))
+            QMessageBox.warning(
+                self,
+                "Best route suggestion applied",
+                f"Auto Route applied its best editable suggestion using '{source}'. "
+                f"It does not yet pass: {issue_text}.\n\n"
+                "Adjust the highlighted route points or constraints, then recheck the path.",
+            )
+            self.statusBar().showMessage(
+                f"Auto Route applied a best-effort suggestion; edit it to resolve: {issue_text}."
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Auto Route applied feasible geometry from '{source}' and checked the exact "
+                "vehicle/payload outline with a 60 mm gap."
+            )
+
     def auto_route_current_path(self) -> None:
         if self.end_pose is None:
             QMessageBox.information(
@@ -5664,13 +6182,23 @@ class VehicleTrackerWindow(QMainWindow):
             )
             return
         profile = self.form_profile()
-        vehicle_radius = hypot(profile.length * 0.5, profile.width * 0.5)
+        example = self._auto_route_example_candidate(profile)
+        if example is not None:
+            candidate, source = example
+            self._apply_auto_route_candidate(candidate, profile, source)
+            return
+        fallback_example = self._auto_route_example_candidate(
+            profile, allow_infeasible=True
+        )
+
+        vehicle_outline = self.block_outline_points(profile)
+        vehicle_clearance = max(abs(y) for _x, y in vehicle_outline) + 60.0
+        loaded_clearance = vehicle_clearance
         if profile.payload_enabled:
-            vehicle_radius = max(
-                vehicle_radius,
-                max(hypot(x, y) for x, y in payload_outline_points(profile)),
+            loaded_clearance = max(
+                loaded_clearance,
+                max(abs(y) for _x, y in payload_outline_points(profile)) + 60.0,
             )
-        clearance = vehicle_radius + 60.0
         grid_hint = max(min(profile.length, profile.width) / 5.0, profile.pose_spacing, 0.05)
         level_obstacles = [
             obstacle
@@ -5683,23 +6211,33 @@ class VehicleTrackerWindow(QMainWindow):
         targets.append((self.end_pose.x, self.end_pose.y, "finish"))
         origin = (self.start_pose.x, self.start_pose.y)
         legs: list[list[tuple[float, float]]] = []
-        for target_x, target_y, target_name in targets:
+        search_issues: list[str] = []
+        for target_index, (target_x, target_y, target_name) in enumerate(targets):
+            clearance = (
+                loaded_clearance
+                if self.dropoff_pose is None or target_index == 0
+                else vehicle_clearance
+            )
             leg = self._obstacle_path(
                 origin,
                 (target_x, target_y),
                 level_obstacles,
                 clearance,
                 grid_hint,
+                profile.supports_point_turn,
             )
             if leg is None:
-                QMessageBox.warning(
-                    self,
-                    "No automatic route",
-                    f"No collision-free route to the {target_name} was found. "
-                    "Open a door, move an obstacle or position, or reduce vehicle/aisle constraints.",
+                # Preserve a direct editable leg instead of returning with no result.
+                # The exact validation below will highlight why this fallback is not
+                # currently compliant.
+                midpoint = (
+                    (origin[0] + target_x) * 0.5,
+                    (origin[1] + target_y) * 0.5,
                 )
-                self.statusBar().showMessage(f"Auto Route could not reach the {target_name}.")
-                return
+                leg = [origin, midpoint, (target_x, target_y)]
+                search_issues.append(
+                    f"a collision-free centreline to the {target_name}"
+                )
             legs.append(leg)
             origin = (target_x, target_y)
         auto_start_operation = self._auto_route_start_operation(
@@ -5732,17 +6270,10 @@ class VehicleTrackerWindow(QMainWindow):
             append_leg(legs[1])
         else:
             append_leg(legs[0])
-        self.stop_route_animation()
-        self.route_waypoints = waypoints
-        self.route_dropoff_waypoint_index = dropoff_index
-        self.route_start_operation = auto_start_operation
-        self.route_point_turns = point_turns
-        self.route_reversing_actions = reverses
-        self.route_continue_reversing = {
+        continue_reversing = {
             index for index in reverses if index < len(waypoints) - 1
         }
-        self.route_tangent_handles.clear()
-        self.route_point_path_modes = {
+        route_modes = {
             index: path_modes.get(index, "straight")
             for index in range(len(waypoints) + 1)
         }
@@ -5753,7 +6284,7 @@ class VehicleTrackerWindow(QMainWindow):
             profile,
         )
         if start_crab_mode is not None and auto_start_operation != "reverse":
-            self.route_point_path_modes[0] = start_crab_mode
+            route_modes[0] = start_crab_mode
         if self.route_end_operation == "stop":
             final_leg = legs[-1]
             end_crab_mode = self._auto_route_crab_segment_mode(
@@ -5763,7 +6294,107 @@ class VehicleTrackerWindow(QMainWindow):
                 profile,
             )
             if end_crab_mode is not None:
-                self.route_point_path_modes[len(waypoints)] = end_crab_mode
+                route_modes[len(waypoints)] = end_crab_mode
+
+        candidate_poses = self._planned_route_poses_for(
+            self.end_pose,
+            waypoints,
+            point_turns,
+            reverses,
+            self.start_pose,
+            {},
+            self.dropoff_pose,
+            route_modes,
+            dropoff_index,
+            auto_start_operation == "reverse",
+            continue_reversing,
+        )
+        steering_invalid, _curvatures, _unsupported = self._route_section_analysis(
+            candidate_poses, profile
+        )
+        obstacle_invalid = self._route_obstacle_collision_flags(
+            candidate_poses, profile
+        )
+        generated_candidate = RoutePlan(
+            "Automatic Path",
+            self.end_pose,
+            list(waypoints),
+            sorted(point_turns),
+            sorted(reverses),
+            self.current_level_name,
+            self.current_start_name,
+            self.start_pose,
+            operations=[RouteOperation("start", auto_start_operation)],
+            dropoff_pose=self.dropoff_pose,
+            point_path_modes=dict(route_modes),
+            dropoff_waypoint_index=dropoff_index,
+            continue_reversing_indices=sorted(continue_reversing),
+        )
+        reasons = list(search_issues)
+        if any(steering_invalid):
+            reasons.append("steering limits")
+        if any(obstacle_invalid):
+            reasons.append("the exact vehicle/payload clearance check")
+        dropoff_check = self._payload_dropoff_analysis(
+            generated_candidate, profile, candidate_poses
+        )
+        if dropoff_check is not None and not dropoff_check.possible:
+            reasons.append("drop-off alignment")
+        if reasons:
+            selected_candidate = generated_candidate
+            selected_source = "generated centreline"
+            selected_issues = reasons
+            if fallback_example is not None:
+                example_candidate, example_source = fallback_example
+                example_issues = self._auto_route_candidate_issues(
+                    example_candidate, profile
+                )
+                if len(example_issues) <= len(selected_issues):
+                    selected_candidate = example_candidate
+                    selected_source = f"saved path {example_source}"
+                    selected_issues = example_issues
+            crab_candidates = [generated_candidate]
+            if fallback_example is not None:
+                crab_candidates.append(fallback_example[0])
+            for base_candidate in crab_candidates:
+                crab_result = self._auto_route_locked_crab_finish_candidate(
+                    base_candidate,
+                    profile,
+                    allow_infeasible=True,
+                )
+                if crab_result is None:
+                    continue
+                crab_candidate, crab_issues = crab_result
+                if not crab_issues:
+                    self._apply_auto_route_candidate(
+                        crab_candidate,
+                        profile,
+                        "early point-turn, locked-heading crab translation, and forward approach",
+                    )
+                    return
+                if len(crab_issues) <= len(selected_issues):
+                    selected_candidate = crab_candidate
+                    selected_source = (
+                        "early point-turn, locked-heading crab translation, and forward approach"
+                    )
+                    selected_issues = crab_issues
+            self._apply_auto_route_candidate(
+                selected_candidate,
+                profile,
+                selected_source,
+                selected_issues,
+            )
+            return
+
+        self.stop_route_animation()
+        self.route_waypoints = waypoints
+        self.route_dropoff_waypoint_index = dropoff_index
+        self.route_start_operation = auto_start_operation
+        self.route_point_turns = point_turns
+        self.route_reversing_actions = reverses
+        self.route_continue_reversing = continue_reversing
+        self.route_tangent_handles.clear()
+        self.route_point_path_modes = route_modes
         self._selected_route_point_index = None
         self.redraw_dynamic_layers(profile)
         self.redraw_route_handles()
@@ -6576,8 +7207,13 @@ class VehicleTrackerWindow(QMainWindow):
                 operations.append(RouteOperation("dropoff", "dropoff"))
                 operations.append(RouteOperation("dropoff", "reverse"))
             path_mode = self.route_point_path_modes.get(index, "turn")
+            outgoing_crab_axis = self._crab_axis_from_mode(
+                self.route_point_path_modes.get(index + 1)
+            )
             operation = (
-                "point_turn"
+                f"crab_turn_{outgoing_crab_axis}"
+                if index in self.route_point_turns and outgoing_crab_axis is not None
+                else "point_turn"
                 if index in self.route_point_turns
                 else "reverse_then_turn"
                 if (
@@ -6623,6 +7259,8 @@ class VehicleTrackerWindow(QMainWindow):
             "turn": "Curved turn",
             "minimum_radius": "Minimum-radius turn",
             "crab": "Crab movement",
+            "crab_turn_x": "Crab turn then translate along DXF X",
+            "crab_turn_y": "Crab turn then translate along DXF Y",
             "point_turn": "Driven-wheel point turn",
             "reverse": "Reverse direction",
             "reverse_then_turn": "Reverse then turn",
@@ -6669,6 +7307,8 @@ class VehicleTrackerWindow(QMainWindow):
                     ("Minimum-radius turn", "minimum_radius"),
                     ("Curved turn", "turn"),
                     ("Crab movement (define headings)", "crab"),
+                    ("Crab turn, lock heading, translate DXF X", "crab_turn_x"),
+                    ("Crab turn, lock heading, translate DXF Y", "crab_turn_y"),
                     ("Driven-wheel point turn", "point_turn"),
                     ("Reverse direction", "reverse"),
                     ("Reverse then turn", "reverse_then_turn"),
@@ -6924,7 +7564,31 @@ class VehicleTrackerWindow(QMainWindow):
             else:
                 self.route_end_operation = operation
         elif waypoint_index is not None:
+            if operation in {"crab_turn_x", "crab_turn_y"}:
+                outgoing_segment = waypoint_index + 1
+                heading = self._prompt_locked_crab_heading(
+                    self.route_point_path_modes.get(outgoing_segment)
+                )
+                if heading is None or not self._set_route_crab_turn_axis(
+                    waypoint_index, operation[-1], heading
+                ):
+                    self._refresh_route_operations_table()
+                    return
+                self.stop_route_animation()
+                self.redraw_dynamic_layers(self.form_profile())
+                self.redraw_route_handles()
+                self._refresh_route_operations_table()
+                self._update_navigation_bounds()
+                return
             existing_mode = self.route_point_path_modes.get(waypoint_index)
+            if (
+                waypoint_index in self.route_point_turns
+                and self._crab_axis_from_mode(
+                    self.route_point_path_modes.get(waypoint_index + 1)
+                )
+                is not None
+            ):
+                self.route_point_path_modes.pop(waypoint_index + 1, None)
             self.route_point_turns.discard(waypoint_index)
             self.route_reversing_actions.discard(waypoint_index)
             self.route_point_path_modes.pop(waypoint_index, None)
@@ -9624,28 +10288,48 @@ class VehicleTrackerWindow(QMainWindow):
         self,
         route_poses: list[Pose],
         profile: VehicleProfile,
+        *,
+        payload_present: bool | None = None,
     ) -> list[bool]:
-        envelope_radius = hypot(profile.length * 0.5, profile.width * 0.5)
-        if profile.payload_enabled:
-            envelope_radius = max(
-                envelope_radius,
-                max(hypot(x, y) for x, y in payload_outline_points(profile)),
-            )
-        clearance = envelope_radius + 60.0
+        vehicle_outline = self.block_outline_points(profile)
+        payload_outline = (
+            payload_outline_points(profile)
+            if profile.payload_enabled and payload_present is not False
+            else []
+        )
         obstacles = [
             obstacle
             for obstacle in self.obstacles
             if obstacle.level_name == self.current_level_name
         ]
+        dropoff_index = next(
+            (index for index, pose in enumerate(route_poses) if pose.maneuver == "dropoff"),
+            None,
+        )
 
-        def collides(pose: Pose) -> bool:
+        def collides(pose: Pose, include_payload: bool) -> bool:
+            outlines = [
+                [pose.transformed_point(x, y) for x, y in vehicle_outline]
+            ]
+            if include_payload and payload_outline:
+                outlines.append(
+                    [pose.transformed_point(x, y) for x, y in payload_outline]
+                )
             for obstacle in obstacles:
                 if not obstacle.is_segment:
                     if obstacle.kind == "door" and obstacle.open:
                         continue
-                    if (
-                        obstacle.x - clearance <= pose.x <= obstacle.x + obstacle.width + clearance
-                        and obstacle.y - clearance <= pose.y <= obstacle.y + obstacle.height + clearance
+                    left, right = sorted((obstacle.x, obstacle.x + obstacle.width))
+                    bottom, top = sorted((obstacle.y, obstacle.y + obstacle.height))
+                    obstacle_outline = [
+                        (left, bottom),
+                        (right, bottom),
+                        (right, top),
+                        (left, top),
+                    ]
+                    if any(
+                        self._polygon_distance(outline, obstacle_outline) <= 60.0
+                        for outline in outlines
                     ):
                         return True
                     continue
@@ -9662,31 +10346,144 @@ class VehicleTrackerWindow(QMainWindow):
                     first_y = obstacle.y + dy * start_fraction
                     second_x = obstacle.x + dx * end_fraction
                     second_y = obstacle.y + dy * end_fraction
-                    section_x, section_y = second_x - first_x, second_y - first_y
-                    length_squared = section_x * section_x + section_y * section_y
-                    amount = (
-                        0.0
-                        if length_squared <= 1e-12
-                        else min(
-                            1.0,
-                            max(
-                                0.0,
-                                ((pose.x - first_x) * section_x + (pose.y - first_y) * section_y)
-                                / length_squared,
-                            ),
+                    if any(
+                        self._polygon_segment_distance(
+                            outline,
+                            (first_x, first_y),
+                            (second_x, second_y),
                         )
-                    )
-                    if hypot(
-                        pose.x - (first_x + amount * section_x),
-                        pose.y - (first_y + amount * section_y),
-                    ) <= obstacle.height * 0.5 + clearance:
+                        <= obstacle.height * 0.5 + 60.0
+                        for outline in outlines
+                    ):
                         return True
             return False
 
         return [
-            collides(first) or collides(second)
-            for first, second in zip(route_poses, route_poses[1:])
+            collides(
+                first,
+                payload_present is True
+                or (payload_present is None and (dropoff_index is None or index <= dropoff_index)),
+            )
+            or collides(
+                second,
+                payload_present is True
+                or (
+                    payload_present is None
+                    and (dropoff_index is None or index + 1 <= dropoff_index)
+                ),
+            )
+            for index, (first, second) in enumerate(zip(route_poses, route_poses[1:]))
         ]
+
+    @staticmethod
+    def _point_segment_distance(
+        point: tuple[float, float],
+        first: tuple[float, float],
+        second: tuple[float, float],
+    ) -> float:
+        dx, dy = second[0] - first[0], second[1] - first[1]
+        length_squared = dx * dx + dy * dy
+        amount = (
+            0.0
+            if length_squared <= 1e-12
+            else min(
+                1.0,
+                max(
+                    0.0,
+                    ((point[0] - first[0]) * dx + (point[1] - first[1]) * dy)
+                    / length_squared,
+                ),
+            )
+        )
+        return hypot(
+            point[0] - (first[0] + amount * dx),
+            point[1] - (first[1] + amount * dy),
+        )
+
+    @classmethod
+    def _segment_distance(
+        cls,
+        first_start: tuple[float, float],
+        first_end: tuple[float, float],
+        second_start: tuple[float, float],
+        second_end: tuple[float, float],
+    ) -> float:
+        def cross(
+            origin: tuple[float, float],
+            first: tuple[float, float],
+            second: tuple[float, float],
+        ) -> float:
+            return (
+                (first[0] - origin[0]) * (second[1] - origin[1])
+                - (first[1] - origin[1]) * (second[0] - origin[0])
+            )
+
+        first_side_a = cross(first_start, first_end, second_start)
+        first_side_b = cross(first_start, first_end, second_end)
+        second_side_a = cross(second_start, second_end, first_start)
+        second_side_b = cross(second_start, second_end, first_end)
+        if first_side_a * first_side_b <= 0.0 and second_side_a * second_side_b <= 0.0:
+            first_min_x, first_max_x = sorted((first_start[0], first_end[0]))
+            first_min_y, first_max_y = sorted((first_start[1], first_end[1]))
+            second_min_x, second_max_x = sorted((second_start[0], second_end[0]))
+            second_min_y, second_max_y = sorted((second_start[1], second_end[1]))
+            if (
+                first_max_x + 1e-9 >= second_min_x
+                and second_max_x + 1e-9 >= first_min_x
+                and first_max_y + 1e-9 >= second_min_y
+                and second_max_y + 1e-9 >= first_min_y
+            ):
+                return 0.0
+        return min(
+            cls._point_segment_distance(first_start, second_start, second_end),
+            cls._point_segment_distance(first_end, second_start, second_end),
+            cls._point_segment_distance(second_start, first_start, first_end),
+            cls._point_segment_distance(second_end, first_start, first_end),
+        )
+
+    @classmethod
+    def _polygon_segment_distance(
+        cls,
+        polygon: list[tuple[float, float]],
+        first: tuple[float, float],
+        second: tuple[float, float],
+    ) -> float:
+        return min(
+            cls._segment_distance(start, end, first, second)
+            for start, end in zip(polygon, polygon[1:] + polygon[:1])
+        )
+
+    @staticmethod
+    def _point_in_polygon(
+        point: tuple[float, float], polygon: list[tuple[float, float]]
+    ) -> bool:
+        inside = False
+        previous = polygon[-1]
+        for current in polygon:
+            if (current[1] > point[1]) != (previous[1] > point[1]):
+                intersection_x = (
+                    (previous[0] - current[0])
+                    * (point[1] - current[1])
+                    / (previous[1] - current[1])
+                    + current[0]
+                )
+                if point[0] < intersection_x:
+                    inside = not inside
+            previous = current
+        return inside
+
+    @classmethod
+    def _polygon_distance(
+        cls,
+        first: list[tuple[float, float]],
+        second: list[tuple[float, float]],
+    ) -> float:
+        if cls._point_in_polygon(first[0], second) or cls._point_in_polygon(second[0], first):
+            return 0.0
+        return min(
+            cls._polygon_segment_distance(first, start, end)
+            for start, end in zip(second, second[1:] + second[:1])
+        )
 
     @staticmethod
     def _route_section_analysis(
@@ -9709,10 +10506,24 @@ class VehicleTrackerWindow(QMainWindow):
                 crab_pose = second if second.maneuver.startswith("crab") else first
                 required_angle = abs(crab_pose.steering_deg)
                 curvature = abs(radians(heading_change)) / max(distance, 1e-9)
+                axis = (
+                    "x"
+                    if crab_pose.maneuver.startswith("crab_x")
+                    else "y"
+                    if crab_pose.maneuver.startswith("crab_y")
+                    else None
+                )
+                axis_tolerance = max(distance, 1.0) * 1e-6
+                axis_aligned = (
+                    axis is None
+                    or (axis == "x" and abs(second.y - first.y) <= axis_tolerance)
+                    or (axis == "y" and abs(second.x - first.x) <= axis_tolerance)
+                )
                 supported = (
                     profile.supports_crab_movement
                     and required_angle <= profile.max_steering_angle_deg + 1e-6
                     and curvature <= profile.max_turn_curvature * 1.02
+                    and axis_aligned
                 )
                 invalid.append(not supported)
                 required_curvatures.append(curvature if supported else float("inf"))
@@ -10228,6 +11039,7 @@ class VehicleTrackerWindow(QMainWindow):
             straight_segment = segment_mode in {"line", "straight"}
             crab_segment = self._is_crab_mode(segment_mode)
             crab_headings = self._crab_headings_from_mode(segment_mode)
+            crab_axis = VehicleTrackerWindow._crab_axis_from_mode(segment_mode)
             minimum_radius_segment = self._is_fillet_mode(segment_mode)
             if minimum_radius_segment:
                 fillet_radius = self._fillet_radius_from_mode(segment_mode)
@@ -10244,6 +11056,12 @@ class VehicleTrackerWindow(QMainWindow):
                 if segment > 0:
                     arc = arc[1:]
                 route.extend(arc)
+                if (
+                    dropoff_waypoint_index is not None
+                    and segment == dropoff_waypoint_index
+                    and route
+                ):
+                    route[-1].maneuver = "dropoff"
                 continue
             for sample in range(41):
                 if segment > 0 and sample == 0:
@@ -10277,7 +11095,13 @@ class VehicleTrackerWindow(QMainWindow):
                     elif steering < -90.0:
                         steering += 180.0
                     maneuver = (
-                        "crab_reverse" if segment_direction < 0 else "crab"
+                        f"crab_{crab_axis}_reverse"
+                        if crab_axis is not None and segment_direction < 0
+                        else f"crab_{crab_axis}"
+                        if crab_axis is not None
+                        else "crab_reverse"
+                        if segment_direction < 0
+                        else "crab"
                     )
                     route.append(
                         Pose(x, y, chassis_heading, steering, maneuver)
@@ -10338,6 +11162,18 @@ class VehicleTrackerWindow(QMainWindow):
                 outgoing_heading = outgoing_motion_heading + (
                     180.0 if segment_directions[segment + 1] < 0 else 0.0
                 )
+                incoming_crab_headings = self._crab_headings_from_mode(
+                    point_path_modes.get(segment)
+                )
+                outgoing_crab_headings = self._crab_headings_from_mode(
+                    point_path_modes.get(segment + 1)
+                )
+                if incoming_crab_headings is not None:
+                    incoming_heading = incoming_crab_headings[1]
+                if outgoing_crab_headings is not None:
+                    # A point turn before a crab leg aligns the chassis to the
+                    # explicitly locked crab heading, not to the translation vector.
+                    outgoing_heading = outgoing_crab_headings[0]
                 heading_delta = ((outgoing_heading - incoming_heading + 180.0) % 360.0) - 180.0
                 pivot_steps = max(2, ceil(abs(heading_delta) / 7.5))
                 steering = (1.0 if heading_delta >= 0.0 else -1.0) * self.form_profile().max_steering_angle_deg
@@ -10353,8 +11189,17 @@ class VehicleTrackerWindow(QMainWindow):
                     )
         first_is_crab = self._is_crab_mode(point_path_modes.get(0))
         first_crab_headings = self._crab_headings_from_mode(point_path_modes.get(0))
+        first_crab_axis = VehicleTrackerWindow._crab_axis_from_mode(
+            point_path_modes.get(0)
+        )
         initial_maneuver = (
-            "crab_reverse" if start_reversing else "crab"
+            f"crab_{first_crab_axis}_reverse"
+            if first_crab_axis is not None and start_reversing
+            else f"crab_{first_crab_axis}"
+            if first_crab_axis is not None
+            else "crab_reverse"
+            if start_reversing
+            else "crab"
         ) if first_is_crab else ("reverse" if start_reversing else "")
         route[0] = Pose(
             start.x,
@@ -10369,8 +11214,17 @@ class VehicleTrackerWindow(QMainWindow):
         last_crab_headings = self._crab_headings_from_mode(
             point_path_modes.get(len(nodes) - 2)
         )
+        last_crab_axis = VehicleTrackerWindow._crab_axis_from_mode(
+            point_path_modes.get(len(nodes) - 2)
+        )
         final_maneuver = (
-            "crab_reverse" if final_direction < 0 else "crab"
+            f"crab_{last_crab_axis}_reverse"
+            if last_crab_axis is not None and final_direction < 0
+            else f"crab_{last_crab_axis}"
+            if last_crab_axis is not None
+            else "crab_reverse"
+            if final_direction < 0
+            else "crab"
         ) if last_is_crab else ("reverse" if final_direction < 0 else "")
         route[-1] = Pose(
             end.x,
@@ -10494,7 +11348,14 @@ class VehicleTrackerWindow(QMainWindow):
             block_drawing, block_geometry = self._shared_block_geometry(
                 profile.dxf_block_name
             )
-        corners = [QPointF(x, -y) for x, y in vehicle_corners(profile, pose)]
+        vehicle_outline = self.block_outline_points(profile)
+        corners = [
+            QPointF(x, -y)
+            for x, y in (
+                pose.transformed_point(local_x, local_y)
+                for local_x, local_y in vehicle_outline
+            )
+        ]
         fill = QColor(37, 99, 235, 20 if block_geometry is not None else (60 if ghost else 180))
         outline = QColor("#2563eb") if not ghost else QColor(37, 99, 235, 110)
         body = QGraphicsPolygonItem(QPolygonF(corners))
@@ -10567,7 +11428,7 @@ class VehicleTrackerWindow(QMainWindow):
                 group.addToGroup(corner)
 
         if not ghost or detailed:
-            nose = pose.transformed_point(profile.length / 2.0, 0)
+            nose = pose.transformed_point(max(x for x, _y in vehicle_outline), 0)
             nose_line = QGraphicsLineItem(pose.x, -pose.y, nose[0], -nose[1])
             nose_line.setPen(QPen(QColor("#172033"), 0.035))
             group.addToGroup(nose_line)

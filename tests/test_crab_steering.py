@@ -25,7 +25,7 @@ class CrabSteeringTests(unittest.TestCase):
         self.assertAlmostEqual(expected, self.profile.calculated_min_turning_radius)
         self.assertIn("selected crab legs: R = infinite", self.profile.turning_radius_calculation)
         self.assertTrue(self.profile.supports_crab_movement)
-        self.assertFalse(self.profile.supports_point_turn)
+        self.assertTrue(self.profile.supports_point_turn)
 
     def test_ninety_degree_crab_moves_sideways_without_yaw(self) -> None:
         result = step_pose(Pose(10.0, 20.0, 0.0), self.profile, 90.0, 5.0)
@@ -51,6 +51,10 @@ class CrabSteeringTests(unittest.TestCase):
         restored = RoutePlan.from_dict(route.to_dict())
         self.assertEqual({0: "crab:15:30"}, restored.point_path_modes)
 
+        route.point_path_modes = {0: "crab:15:15:x"}
+        restored = RoutePlan.from_dict(route.to_dict())
+        self.assertEqual({0: "crab:15:15:x"}, restored.point_path_modes)
+
     def test_sideways_crab_leg_with_fixed_heading_is_feasible(self) -> None:
         route = [
             Pose(0.0, 0.0, 0.0, 90.0, "crab"),
@@ -60,6 +64,24 @@ class CrabSteeringTests(unittest.TestCase):
             route, self.profile
         )
         self.assertEqual([False], invalid)
+
+    def test_axis_locked_crab_rejects_translation_off_selected_axis(self) -> None:
+        aligned = [
+            Pose(0.0, 0.0, 0.0, 0.0, "crab_x"),
+            Pose(5.0, 0.0, 0.0, 0.0, "crab_x"),
+        ]
+        diagonal = [
+            Pose(0.0, 0.0, 0.0, 0.0, "crab_x"),
+            Pose(5.0, 1.0, 0.0, 0.0, "crab_x"),
+        ]
+        aligned_invalid, _required, _unsupported = (
+            VehicleTrackerWindow._route_section_analysis(aligned, self.profile)
+        )
+        diagonal_invalid, _required, _unsupported = (
+            VehicleTrackerWindow._route_section_analysis(diagonal, self.profile)
+        )
+        self.assertEqual([False], aligned_invalid)
+        self.assertEqual([True], diagonal_invalid)
 
     def test_planner_applies_defined_headings_to_selected_final_section(self) -> None:
         class PlannerHarness:
@@ -173,6 +195,46 @@ class CrabSteeringTests(unittest.TestCase):
             route, restricted
         )
         self.assertTrue(any(invalid))
+
+    def test_point_turn_before_crab_finishes_at_locked_chassis_heading(self) -> None:
+        class PlannerHarness:
+            _planned_route_poses_for = VehicleTrackerWindow._planned_route_poses_for
+            _fillet_connected_straights = staticmethod(
+                VehicleTrackerWindow._fillet_connected_straights
+            )
+            _is_fillet_mode = staticmethod(VehicleTrackerWindow._is_fillet_mode)
+            _is_crab_mode = staticmethod(VehicleTrackerWindow._is_crab_mode)
+            _crab_headings_from_mode = staticmethod(
+                VehicleTrackerWindow._crab_headings_from_mode
+            )
+            _fillet_radius_from_mode = staticmethod(
+                VehicleTrackerWindow._fillet_radius_from_mode
+            )
+            _minimum_radius_arc_poses = staticmethod(
+                VehicleTrackerWindow._minimum_radius_arc_poses
+            )
+
+            def __init__(self, profile: VehicleProfile) -> None:
+                self.start_pose = Pose(5.0, 10.0, -90.0)
+                self.profile = profile
+
+            def form_profile(self) -> VehicleProfile:
+                return self.profile
+
+        route = PlannerHarness(self.profile)._planned_route_poses_for(
+            Pose(10.0, 0.0, 0.0),
+            [(5.0, 5.0), (5.0, 0.0)],
+            point_turn_indices={0},
+            point_path_modes={1: "crab:0:0", 2: "straight"},
+        )
+
+        pivot = [pose for pose in route if pose.maneuver == "point_turn"]
+        crab = [pose for pose in route if pose.maneuver == "crab"]
+        self.assertTrue(pivot)
+        self.assertTrue(crab)
+        self.assertAlmostEqual(0.0, pivot[-1].heading_deg)
+        self.assertTrue(all(abs(pose.heading_deg) < 1e-9 for pose in crab))
+        self.assertAlmostEqual(0.0, route[-1].heading_deg)
 
 
 if __name__ == "__main__":
