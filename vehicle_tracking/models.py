@@ -352,9 +352,137 @@ class RouteOperation:
         }
 
 
+@dataclass
+class PayloadLocation:
+    name: str
+    level_name: str
+    pose: Pose
+    group_name: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PayloadLocation":
+        pose = data.get("pose", {})
+        return cls(
+            str(data.get("name", "Payload")),
+            str(data.get("level_name", "Level 1")),
+            Pose(
+                float(pose.get("x", 0.0)),
+                float(pose.get("y", 0.0)),
+                float(pose.get("heading_deg", 0.0)),
+            ),
+            str(data.get("group_name", "")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "level_name": self.level_name,
+            "pose": {
+                "x": self.pose.x,
+                "y": self.pose.y,
+                "heading_deg": self.pose.heading_deg,
+            },
+            "group_name": self.group_name,
+        }
+
+
+@dataclass
+class FinishPosition:
+    name: str
+    level_name: str
+    pose: Pose
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FinishPosition":
+        pose = data.get("pose", {})
+        return cls(
+            str(data.get("name", "Finish")),
+            str(data.get("level_name", "Level 1")),
+            Pose(
+                float(pose.get("x", 0.0)),
+                float(pose.get("y", 0.0)),
+                float(pose.get("heading_deg", 0.0)),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "level_name": self.level_name,
+            "pose": {
+                "x": self.pose.x,
+                "y": self.pose.y,
+                "heading_deg": self.pose.heading_deg,
+            },
+        }
+
+
+@dataclass
+class Obstacle:
+    name: str
+    level_name: str
+    kind: str
+    x: float
+    y: float
+    width: float
+    height: float
+    open: bool = False
+    end_x: float | None = None
+    end_y: float | None = None
+    chain_name: str = ""
+    host_wall_name: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Obstacle":
+        kind = str(data.get("kind", "wall")).casefold()
+        if kind not in {"wall", "door"}:
+            kind = "wall"
+        return cls(
+            str(data.get("name", kind.title())),
+            str(data.get("level_name", "Level 1")),
+            kind,
+            float(data.get("x", 0.0)),
+            float(data.get("y", 0.0)),
+            max(0.0, float(data.get("width", 0.0))),
+            max(0.0, float(data.get("height", 0.0))),
+            bool(data.get("open", False)) if kind == "door" else False,
+            float(data["end_x"]) if isinstance(data.get("end_x"), (int, float)) else None,
+            float(data["end_y"]) if isinstance(data.get("end_y"), (int, float)) else None,
+            str(data.get("chain_name", "")),
+            str(data.get("host_wall_name", "")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "level_name": self.level_name,
+            "kind": self.kind,
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+            "open": self.open if self.kind == "door" else False,
+            "end_x": self.end_x,
+            "end_y": self.end_y,
+            "chain_name": self.chain_name,
+            "host_wall_name": self.host_wall_name,
+        }
+
+    @property
+    def is_segment(self) -> bool:
+        return self.end_x is not None and self.end_y is not None
+
+
 def _valid_point_path_mode(value: Any) -> bool:
     mode = str(value)
-    if mode in {"line", "straight", "turn", "minimum_radius", "crab"}:
+    if mode in {
+        "line",
+        "straight",
+        "turn",
+        "minimum_radius",
+        "crab",
+        "reverse_then_turn",
+    }:
         return True
     if mode.startswith("crab:"):
         parts = mode.split(":")
@@ -390,6 +518,9 @@ class RoutePlan:
     dropoff_pose: Pose | None = None
     point_path_modes: dict[int, str] = field(default_factory=dict)
     dropoff_waypoint_index: int | None = None
+    payload_location_name: str = ""
+    finish_position_name: str = ""
+    continue_reversing_indices: list[int] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoutePlan":
@@ -469,6 +600,21 @@ class RoutePlan:
                 if isinstance(data.get("dropoff_waypoint_index"), (int, float))
                 else None
             ),
+            payload_location_name=str(data.get("payload_location_name", "")),
+            finish_position_name=str(data.get("finish_position_name", "")),
+            continue_reversing_indices=sorted(
+                {
+                    int(index)
+                    for index in (
+                        data.get("continue_reversing_indices", [])
+                        if "continue_reversing_indices" in data
+                        else data.get("reversing_action_indices", [])
+                        if bool(data.get("continue_reversing", True))
+                        else []
+                    )
+                    if isinstance(index, (int, float)) and int(index) >= 0
+                }
+            ),
         )
         if plan.operations and not (
             data.get("point_turn_indices") or data.get("reversing_action_indices")
@@ -484,7 +630,7 @@ class RoutePlan:
                 operation.waypoint_index
                 for operation in plan.operations
                 if operation.location == "waypoint"
-                and operation.operation == "reverse"
+                and operation.operation in {"reverse", "reverse_then_turn"}
                 and operation.waypoint_index is not None
             )
         if plan.operations and not data.get("point_path_modes"):
@@ -495,6 +641,12 @@ class RoutePlan:
                 and _valid_point_path_mode(operation.operation)
                 and operation.waypoint_index is not None
             }
+        if (
+            "continue_reversing_indices" not in data
+            and bool(data.get("continue_reversing", True))
+            and not plan.continue_reversing_indices
+        ):
+            plan.continue_reversing_indices = list(plan.reversing_action_indices)
         return plan
 
     def to_dict(self) -> dict[str, Any]:
@@ -538,6 +690,9 @@ class RoutePlan:
                 str(index): mode for index, mode in sorted(self.point_path_modes.items())
             },
             "dropoff_waypoint_index": self.dropoff_waypoint_index,
+            "payload_location_name": self.payload_location_name,
+            "finish_position_name": self.finish_position_name,
+            "continue_reversing_indices": list(self.continue_reversing_indices),
         }
 
     def ordered_operations(self) -> list[RouteOperation]:
@@ -559,6 +714,8 @@ class RoutePlan:
             operation = (
                 "point_turn"
                 if index in point_turns
+                else "reverse_then_turn"
+                if index in reverses and path_mode == "reverse_then_turn"
                 else "reverse"
                 if index in reverses
                 else "crab"
@@ -775,10 +932,13 @@ class VehicleTrackingProject:
     vehicles: list[VehicleProfile]
     active_level: str
     active_start: str
+    payload_locations: list[PayloadLocation] = field(default_factory=list)
+    finish_positions: list[FinishPosition] = field(default_factory=list)
+    obstacles: list[Obstacle] = field(default_factory=list)
 
 
 class ProjectStore:
-    VERSION = 1
+    VERSION = 2
 
     @classmethod
     def save(cls, path: Path, project: VehicleTrackingProject) -> None:
@@ -804,6 +964,13 @@ class ProjectStore:
             "vehicles": [vehicle.to_dict() for vehicle in project.vehicles],
             "active_level": project.active_level,
             "active_start": project.active_start,
+            "payload_locations": [
+                location.to_dict() for location in project.payload_locations
+            ],
+            "finish_positions": [
+                finish.to_dict() for finish in project.finish_positions
+            ],
+            "obstacles": [obstacle.to_dict() for obstacle in project.obstacles],
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -853,6 +1020,43 @@ class ProjectStore:
         active_start = str(data.get("active_start", starts[0].name))
         if not any(start.name == active_start for start in starts):
             active_start = starts[0].name
+        payload_locations = [
+            PayloadLocation.from_dict(item)
+            for item in data.get("payload_locations", [])
+            if isinstance(item, dict)
+        ]
+        if version < 2 and payload_locations:
+            profile = vehicles[0]
+            for location in payload_locations:
+                vehicle_heading = radians(location.pose.heading_deg)
+                location.pose.x += (
+                    cos(vehicle_heading) * profile.payload_x
+                    - sin(vehicle_heading) * profile.payload_y
+                )
+                location.pose.y += (
+                    sin(vehicle_heading) * profile.payload_x
+                    + cos(vehicle_heading) * profile.payload_y
+                )
+                location.pose.heading_deg += profile.payload_rotation_deg
+        finish_positions = [
+            FinishPosition.from_dict(item)
+            for item in data.get("finish_positions", [])
+            if isinstance(item, dict)
+        ]
+        obstacles = [
+            Obstacle.from_dict(item)
+            for item in data.get("obstacles", [])
+            if isinstance(item, dict)
+        ]
         return VehicleTrackingProject(
-            levels, drawings, starts, routes, vehicles, active_level, active_start
+            levels,
+            drawings,
+            starts,
+            routes,
+            vehicles,
+            active_level,
+            active_start,
+            payload_locations,
+            finish_positions,
+            obstacles,
         )

@@ -33,7 +33,7 @@ class DxfPrimitive:
 @dataclass
 class DxfDrawing:
     path: Path
-    doc: Drawing
+    doc: Drawing | None
     primitives: list[DxfPrimitive]
     block_names: list[str]
     bounds: tuple[float, float, float, float] | None = None
@@ -88,12 +88,30 @@ def load_dxf(path: Path, progress_callback: Callable[[int, str], None] | None = 
     return drawing
 
 
+def load_dxf_process_safe(
+    path_value: str,
+    block_names: tuple[str, ...] = (),
+) -> DxfDrawing:
+    """Load and convert a DXF into a payload that can cross a process boundary."""
+    drawing = load_dxf(Path(path_value))
+    for block_name in block_names:
+        if block_name in drawing.block_names:
+            get_block_geometry(drawing, block_name)
+    drawing.doc = None
+    return drawing
+
+
 def get_block_geometry(drawing: DxfDrawing, block_name: str) -> DxfBlockGeometry | None:
-    if not block_name or block_name not in drawing.doc.blocks:
+    if not block_name:
         return None
     cached = drawing.block_geometries.get(block_name)
     if cached is not None:
         return cached
+
+    if drawing.doc is None:
+        drawing.doc = ezdxf.readfile(drawing.path)
+    if block_name not in drawing.doc.blocks:
+        return None
 
     block = drawing.doc.blocks.get(block_name)
     raw_bounds = _drawing_bounds(block)

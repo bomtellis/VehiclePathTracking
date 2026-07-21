@@ -103,6 +103,62 @@ class CrabSteeringTests(unittest.TestCase):
             )
         )
 
+    def test_reverse_then_turn_uses_driven_point_turn_sequence(self) -> None:
+        class PlannerHarness:
+            _planned_route_poses_for = VehicleTrackerWindow._planned_route_poses_for
+            _fillet_connected_straights = staticmethod(
+                VehicleTrackerWindow._fillet_connected_straights
+            )
+            _is_fillet_mode = staticmethod(VehicleTrackerWindow._is_fillet_mode)
+            _is_crab_mode = staticmethod(VehicleTrackerWindow._is_crab_mode)
+            _crab_headings_from_mode = staticmethod(
+                VehicleTrackerWindow._crab_headings_from_mode
+            )
+            _fillet_radius_from_mode = staticmethod(
+                VehicleTrackerWindow._fillet_radius_from_mode
+            )
+            _minimum_radius_arc_poses = staticmethod(
+                VehicleTrackerWindow._minimum_radius_arc_poses
+            )
+
+            def __init__(self, profile: VehicleProfile) -> None:
+                self.start_pose = Pose(0.0, 0.0, 0.0)
+                self.profile = profile
+
+            def form_profile(self) -> VehicleProfile:
+                return self.profile
+
+        route = PlannerHarness(self.profile)._planned_route_poses_for(
+            Pose(5.0, 5.0, -90.0),
+            [(5.0, 0.0)],
+            reversing_action_indices={0},
+            point_path_modes={0: "reverse_then_turn"},
+        )
+
+        pivot_indices = [
+            index for index, pose in enumerate(route) if pose.maneuver == "point_turn"
+        ]
+        self.assertTrue(pivot_indices)
+        self.assertTrue(any(pose.maneuver == "reverse" for pose in route[pivot_indices[-1] + 1 :]))
+
+        persistent_reverse = PlannerHarness(self.profile)._planned_route_poses_for(
+            Pose(-5.0, 0.0, 0.0),
+            [(5.0, 0.0), (0.0, 0.0)],
+            reversing_action_indices={0},
+            point_path_modes={0: "line", 1: "line", 2: "line"},
+            continue_reversing_indices={0},
+        )
+        single_leg_reverse = PlannerHarness(self.profile)._planned_route_poses_for(
+            Pose(-5.0, 0.0, 0.0),
+            [(5.0, 0.0), (0.0, 0.0)],
+            reversing_action_indices={0},
+            point_path_modes={0: "line", 1: "line", 2: "line"},
+            continue_reversing_indices=set(),
+        )
+        self.assertEqual("reverse", persistent_reverse[-1].maneuver)
+        self.assertTrue(any(pose.maneuver == "reverse" for pose in single_leg_reverse))
+        self.assertEqual("", single_leg_reverse[-1].maneuver)
+
     def test_planned_crab_heading_change_is_rejected(self) -> None:
         restricted = VehicleProfile(
             steering_mode=SteeringMode.CRAB,
